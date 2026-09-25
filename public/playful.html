@@ -3,11 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OTT V2 // Đấu Trường Kéo Búa Bao Chiến Thuật</title>
+  <title>OTT V2 // Đấu Trường Kéo Búa Bao Chiến Thuật (Playfull Multiplayer)</title>
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/board.css">
   <link rel="stylesheet" href="/css/animations.css">
   <link rel="stylesheet" href="/css/modal.css">
+  <!-- PlayroomKit Multiplayer Full UMD library (playfull / playroom integration) -->
+  <script src="https://unpkg.com/playroomkit/multiplayer.full.umd.js" crossorigin="anonymous"></script>
 </head>
 <body>
   <main class="app-shell">
@@ -17,7 +19,7 @@
         <span class="brand-mark">O</span>
         <div>
           <strong>OTT V2</strong>
-          <small>TACTICAL ARENA // 9x9</small>
+          <small>PLAYFULL MULTIPLAYER // 9x9</small>
         </div>
       </div>
       <div class="topbar-actions">
@@ -37,8 +39,8 @@
         <p class="eyebrow">CHIẾN THUẬT BÀN CỜ 09 x 09</p>
         <h1>Đọc thế trận.<br><em>Ra tay đúng nhịp.</em></h1>
         <p class="intro">
-          Oẳn Tù Tì V2 biến trò chơi dân gian thành một trận đấu trí đỉnh cao trên bàn cờ 9x9.
-          Mỗi quân di chuyển theo 8 hướng như quân Vua, vận dụng quy luật Đấm - Lá - Kéo để triệt hạ đối phương hoặc đột kích căn cứ!
+          Oẳn Tù Tì V2 - Giao diện Playfull Server Multiplayer cho phép nhiều người chơi cùng lúc trên các phòng đấu độc lập.
+          Di chuyển 8 hướng như quân Vua, vận dụng quy luật Đấm - Lá - Kéo để triệt hạ đối phương hoặc đột kích căn cứ!
         </p>
 
         <div class="feature-cards">
@@ -63,7 +65,7 @@
       <div class="lobby-panel-container">
         <!-- Online Multiplayer Panel -->
         <div class="lobby-panel">
-          <div class="panel-kicker">ĐẤU TRỰC TUYẾN</div>
+          <div class="panel-kicker">PHÒNG ĐẤU MULTIPLAYER</div>
           <h2>Tham gia phòng đấu</h2>
 
           <!-- Mode selector -->
@@ -399,7 +401,6 @@
     let gameTimer = null;
     let timeLeft = 30;
 
-    // Helper message display
     window.showMessage = function(text, type = 'info') {
       const msgEl = $('game-message');
       if (msgEl) {
@@ -424,14 +425,12 @@
       }, 3000);
     }
 
-    // Initialize BoardView
     const boardView = new BoardView(renderer, (from, to) => {
       handleMove(from, to);
     }, sound, vfx);
 
     function handleMove(from, to) {
       if (isLocalGame) {
-        // Local pass-and-play or vs Bot
         const outcome = window.applyLocalMove(state, state.turn, from, to);
         if (outcome.ok) {
           state = outcome.state;
@@ -444,18 +443,15 @@
           showToast(outcome.reason, 'error');
         }
       } else if (network) {
-        // Online network move
         network.send('move', { from, to });
       }
     }
 
-    // State update handler
     function onStateUpdated(result, capturedPiece, from, to) {
       renderer.render(state);
       boardView.setState(state, isLocalGame ? 'local' : player);
       updateHUD();
 
-      // Sound and visual effects
       if (result === 'capture') {
         const destCell = renderer.getCell(to.row, to.col);
         const attacker = state.board[to.row][to.col];
@@ -465,7 +461,6 @@
         sound.playMove();
       }
 
-      // Check Base capture
       if ((to.row === 8 && to.col === 8 && state.board[8][8]?.player === 'p1') ||
           (to.row === 0 && to.col === 0 && state.board[0][0]?.player === 'p2')) {
         const baseCell = renderer.getCell(to.row, to.col);
@@ -473,7 +468,6 @@
         vfx.playBaseCapture(baseCell, state.winner);
       }
 
-      // Check Winner
       if (state.winner) {
         stopTurnTimer();
         setTimeout(() => showResultModal(state.winner, state.winReason), 600);
@@ -488,7 +482,6 @@
     function updateHUD() {
       if (!state) return;
 
-      // Turn banner
       const isMyTurn = isLocalGame ? true : (state.turn === player);
       const turnBanner = $('turn-banner');
       if (isMyTurn) {
@@ -499,11 +492,9 @@
         $('turn-label').textContent = `Lượt của đối thủ (${state.turn === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'})`;
       }
 
-      // Active card outline
       $('p1-card').classList.toggle('active-turn', state.turn === 'p1');
       $('p2-card').classList.toggle('active-turn', state.turn === 'p2');
 
-      // Player cards connection state
       if (isLocalGame) {
         $('p1-state').textContent = 'Đang chơi tại máy';
         $('p2-state').textContent = isBotGame ? 'Máy (Bot AI)' : 'Đang chơi tại máy';
@@ -512,7 +503,6 @@
         $('p2-state').textContent = state.players.p2 ? 'Đã sẵn sàng' : 'Chờ kết nối...';
       }
 
-      // Role badges
       if (!isLocalGame) {
         $('p1-role-badge').textContent = player === 'p1' ? 'BẠN' : 'ĐỐI THỦ';
         $('p1-role-badge').className = `role-tag ${player === 'p1' ? 'is-you' : 'is-opponent'}`;
@@ -523,12 +513,10 @@
         $('p2-role-badge').textContent = isBotGame ? 'BOT AI' : 'NGƯỜI CHƠI 2';
       }
 
-      // Piece counts & tracker
       const counts = window.GameRules.countPieces(state.board);
       updatePieceTracker('p1', counts.p1);
       updatePieceTracker('p2', counts.p2);
 
-      // Move history list
       renderHistory(state.history);
     }
 
@@ -569,7 +557,6 @@
       }).join('');
     }
 
-    // Modal display
     function showResultModal(winner, reason) {
       const isWinner = isLocalGame ? true : (winner === player);
       $('result-icon').textContent = isWinner ? '🏆' : '💔';
@@ -577,7 +564,6 @@
       $('result-title').style.color = isWinner ? '#2a9d8f' : '#d32f2f';
       $('result-reason').textContent = reason || 'Trận đấu kết thúc!';
 
-      // Match stats
       $('stat-total-moves').textContent = state.history ? state.history.length : 0;
       const capturedCount = state.history ? state.history.filter(h => h.result === 'capture').length : 0;
       $('stat-captured-count').textContent = capturedCount;
@@ -592,7 +578,6 @@
       }
     }
 
-    // Turn timer
     function resetTurnTimer() {
       stopTurnTimer();
       timeLeft = 30;
@@ -613,7 +598,6 @@
       }
     }
 
-    // Enter Game Screen
     function showGameView(data) {
       player = data.player || player;
       state = data.state;
@@ -624,7 +608,6 @@
       onStateUpdated('init');
     }
 
-    // Setup Local Game
     function startLocalGame(vsBot = false) {
       isLocalGame = true;
       isBotGame = vsBot;
@@ -634,7 +617,6 @@
       showToast(vsBot ? 'Bắt đầu đấu với Bot AI! Bạn là Đội Đỏ.' : 'Bắt đầu chơi 2 người trên cùng máy!', 'info');
     }
 
-    // Heuristic Bot AI for P2
     function triggerBotTurn() {
       if (!isBotGame || state.winner || state.turn !== 'p2') return;
 
@@ -653,14 +635,10 @@
 
       if (!allMoves.length) return;
 
-      // Score moves
       allMoves.forEach(m => {
         let score = 0;
-        // Priority 1: Reach A1 base (0, 0)
         if (m.to.row === 0 && m.to.col === 0) score += 1000;
-        // Priority 2: Capture opponent piece
         if (m.type === 'capture') score += 100;
-        // Priority 3: Move closer to target A1 (0, 0)
         const distBefore = Math.hypot(m.from.row - 0, m.from.col - 0);
         const distAfter = Math.hypot(m.to.row - 0, m.to.col - 0);
         score += (distBefore - distAfter) * 10;
@@ -673,7 +651,6 @@
       handleMove(chosen.from, chosen.to);
     }
 
-    // Client-side local move engine (for local / bot games)
     function createInitialClientState(mode = 'classic') {
       const board = Array.from({ length: 9 }, () => Array(9).fill(null));
       if (mode === 'tactical') {
@@ -751,7 +728,6 @@
         captured: capturedPiece?.type
       });
 
-      // Check Base Infiltration
       if (turnPlayer === 'p1' && to.row === 8 && to.col === 8) {
         curState.winner = 'p1';
         curState.winReason = 'Đội Đỏ đã đưa quân xâm nhập căn cứ I9 của đối phương!';
@@ -759,7 +735,6 @@
         curState.winner = 'p2';
         curState.winReason = 'Đội Xanh đã đưa quân xâm nhập căn cứ A1 của đối phương!';
       } else {
-        // Check complete elimination of any 1 type
         const counts = window.GameRules.countPieces(curState.board);
         const opponent = turnPlayer === 'p1' ? 'p2' : 'p1';
         const types = ['rock', 'paper', 'scissors'];
@@ -775,7 +750,6 @@
       return { ok: true, result, capturedPiece, state: curState };
     };
 
-    // Network connection
     function connectOnline(callback) {
       if (network && network.connected) {
         callback();
@@ -861,7 +835,6 @@
       });
     };
 
-    // UI Event Listeners
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.onclick = () => {
         document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -911,23 +884,20 @@
 
     $('copy-link-btn').onclick = () => {
       const code = $('room-code-display').textContent;
-      const url = `${location.origin}?room=${code}`;
+      const url = `${location.origin}/playfull.html?room=${code}`;
       navigator.clipboard?.writeText(url).then(() => showToast('Đã sao chép liên kết mời bạn bè!', 'info'));
     };
 
-    // Sound toggle
     $('sound-toggle-btn').onclick = () => {
       const isMuted = sound.toggleMute();
       $('sound-icon').textContent = isMuted ? '🔇' : '🔊';
       showToast(isMuted ? 'Đã tắt âm thanh' : 'Đã bật âm thanh', 'info');
     };
 
-    // Rules Modal
     $('rules-btn').onclick = () => $('rules-modal').classList.remove('hidden');
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
 
-    // Quick Chat buttons
     document.querySelectorAll('.chat-pill').forEach(btn => {
       btn.onclick = () => {
         const text = btn.dataset.text;
@@ -939,7 +909,6 @@
       };
     });
 
-    // Auto connect and join from URL query (?room=CODE)
     window.addEventListener('DOMContentLoaded', () => {
       connectOnline(() => {
         network.send('list_rooms');

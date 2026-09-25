@@ -1,1 +1,307 @@
-.board-wrap { width:min(100%, 720px); }.board-row { display:flex; gap:10px; }.board { display:grid; grid-template-columns:repeat(9,1fr); width:100%; aspect-ratio:1; border:8px solid var(--ink); background:var(--ink); gap:1px; }.board-cell { position:relative; display:grid; place-items:center; background:#d8c79d; min-width:0; }.board-cell:nth-child(odd) { background:#bfaa7e; }.board-cell.base-a1:after,.board-cell.base-i9:after { content:'✦'; position:absolute; color:rgba(23,33,31,.35); font-size:clamp(16px,3vw,28px); }.board-cell.selected { outline:4px solid var(--lime); outline-offset:-4px; z-index:2; }.board-cell.target { box-shadow:inset 0 0 0 4px rgba(217,233,135,.9); }.board-coordinates { color:var(--muted); font:11px 'DM Mono',monospace; }.board-coordinates.top { display:grid; grid-template-columns:repeat(9,1fr); margin-left:32px; text-align:center; padding-bottom:8px; }.board-coordinates.side { width:22px; display:grid; grid-template-rows:repeat(9,1fr); align-items:center; text-align:left; padding:3px 0; }.piece { width:68%; aspect-ratio:1; border-radius:50%; display:grid; place-items:center; color:white; font-weight:700; font-size:clamp(13px,2.4vw,25px); box-shadow:inset 0 -5px 0 rgba(0,0,0,.16),0 5px 8px rgba(23,33,31,.25); transition:transform .2s; }.piece:hover { transform:translateY(-3px); }.piece.p1 { background:var(--red); }.piece.p2 { background:var(--blue); }.piece.rock:before { content:'●'; }.piece.paper:before { content:'▰'; }.piece.scissors:before { content:'✦'; }.game-message { text-align:center; color:var(--muted); }
+/* 9x9 Tactical Grid & Piece Presentation */
+
+.board-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 660px;
+  margin: 0 auto;
+}
+
+.board-wrap {
+  width: 100%;
+  position: relative;
+  user-select: none;
+}
+
+.board-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.board-coordinates {
+  color: var(--muted);
+  font: 600 12px 'DM Mono', monospace;
+  letter-spacing: 0.05em;
+  user-select: none;
+}
+
+.board-coordinates.top {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  margin-left: 28px;
+  text-align: center;
+  padding-bottom: 8px;
+}
+
+.board-coordinates.side {
+  width: 20px;
+  display: grid;
+  grid-template-rows: repeat(9, 1fr);
+  align-items: center;
+  text-align: center;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
+  width: 100%;
+  aspect-ratio: 1;
+  background: #17211f;
+  border: 6px solid #17211f;
+  border-radius: 12px;
+  gap: 2px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+/* Cells */
+.board-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8dcc4;
+  border: none;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+  min-width: 0;
+}
+
+.board-cell.cell-dark {
+  background: #cbbba2;
+}
+
+.board-cell:hover {
+  filter: brightness(1.06);
+}
+
+/* Base Cells */
+.board-cell.base-cell {
+  position: relative;
+}
+
+.board-cell.base-a1 {
+  background: #fce4e4;
+}
+
+.board-cell.base-a1.cell-dark {
+  background: #f8c9c9;
+}
+
+.board-cell.base-i9 {
+  background: #e1f0fa;
+}
+
+.board-cell.base-i9.cell-dark {
+  background: #c8e3f5;
+}
+
+.base-badge {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  font: 700 9px 'DM Mono', monospace;
+  padding: 1px 4px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1;
+  line-height: 1.2;
+}
+
+.base-badge-p1 {
+  background: rgba(211, 47, 47, 0.85);
+  color: #fff;
+}
+
+.base-badge-p2 {
+  background: rgba(25, 118, 210, 0.85);
+  color: #fff;
+}
+
+/* Selected Cell */
+.board-cell.selected-cell {
+  background: #ffeaa7 !important;
+  outline: 3px solid #f39c12;
+  outline-offset: -3px;
+  z-index: 4;
+}
+
+/* Last move cells */
+.board-cell.last-move-cell {
+  box-shadow: inset 0 0 0 3px rgba(243, 156, 18, 0.55);
+}
+
+/* Drag hover */
+.board-cell.drag-hover {
+  background: #d4edda !important;
+  box-shadow: inset 0 0 0 3px #28a745;
+}
+
+/* Pieces */
+.piece {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  z-index: 2;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.2s ease;
+}
+
+.piece:hover {
+  transform: translateY(-4px) scale(1.06);
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.piece:active, .piece.dragging {
+  cursor: grabbing;
+  opacity: 0.75;
+  transform: scale(0.95);
+}
+
+.piece img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.piece-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  font-size: 13px;
+  background: rgba(23, 33, 31, 0.85);
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Move Hints & Overlays */
+.move-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Empty Move (Green Dot) */
+.hint-type-move .hint-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #2a9d8f;
+  box-shadow: 0 0 8px #2a9d8f, inset 0 0 3px #fff;
+  animation: pulse-dot 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-dot {
+  0% { transform: scale(0.85); opacity: 0.75; }
+  100% { transform: scale(1.15); opacity: 1; }
+}
+
+.board-cell.hint-move {
+  cursor: pointer;
+}
+
+.board-cell.hint-move:hover {
+  background: #c8e6c9 !important;
+}
+
+/* Capture Move (Red swords / crosshair) */
+.hint-type-capture {
+  z-index: 5;
+}
+
+.hint-type-capture .hint-ring {
+  position: absolute;
+  inset: 4px;
+  border: 3px dashed #e63946;
+  border-radius: 50%;
+  animation: rotate-ring 6s linear infinite;
+  box-shadow: 0 0 10px rgba(230, 57, 70, 0.7);
+}
+
+.hint-type-capture .hint-sword {
+  font-size: 18px;
+  position: relative;
+  z-index: 2;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+  animation: bounce-sword 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes rotate-ring {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bounce-sword {
+  0% { transform: scale(0.9); }
+  100% { transform: scale(1.15); }
+}
+
+.board-cell.hint-capture {
+  cursor: pointer;
+}
+
+.board-cell.hint-capture:hover {
+  background: #ffcdd2 !important;
+}
+
+/* Blocked Move (Shield / Same Type) */
+.hint-type-blocked .hint-shield {
+  font-size: 16px;
+  opacity: 0.85;
+  filter: grayscale(0.5);
+}
+
+.board-cell.hint-blocked {
+  cursor: not-allowed;
+}
+
+/* Defeat / Danger Move (Attacking stronger piece) */
+.hint-type-defeat .hint-danger {
+  font-size: 15px;
+  opacity: 0.9;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .board-coordinates.top {
+    margin-left: 18px;
+    font-size: 10px;
+  }
+  .board-coordinates.side {
+    width: 14px;
+    font-size: 10px;
+  }
+  .piece-badge {
+    width: 14px;
+    height: 14px;
+    font-size: 9px;
+  }
+  .base-badge {
+    font-size: 7px;
+    padding: 0 2px;
+  }
+}

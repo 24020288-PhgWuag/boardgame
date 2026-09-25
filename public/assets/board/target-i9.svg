@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 12 62 38l28 4-20 20 5 28-25-13-25 13 5-28-20-20 28-4z" fill="none" stroke="#17211f" stroke-width="6"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="targetI9Grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#42a5f5" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#1976d2" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#0d47a1" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="96" height="96" rx="8" fill="url(#targetI9Grad)"/>
+  <rect x="6" y="6" width="88" height="88" rx="6" fill="none" stroke="#1976d2" stroke-width="2" stroke-dasharray="6 3"/>
+  <!-- Target Crosshair & Star -->
+  <circle cx="50" cy="50" r="30" fill="none" stroke="#1976d2" stroke-width="2.5"/>
+  <circle cx="50" cy="50" r="16" fill="none" stroke="#1976d2" stroke-width="2"/>
+  <circle cx="50" cy="50" r="5" fill="#1976d2"/>
+  <line x1="50" y1="12" x2="50" y2="30" stroke="#1976d2" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="50" y1="70" x2="50" y2="88" stroke="#1976d2" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="12" y1="50" x2="30" y2="50" stroke="#1976d2" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="70" y1="50" x2="88" y2="50" stroke="#1976d2" stroke-width="2.5" stroke-linecap="round"/>
+  <text x="50" y="80" text-anchor="middle" font-family="'DM Mono', monospace" font-size="9" font-weight="700" fill="#1976d2">CĂN CỨ I9</text>
+</svg>
