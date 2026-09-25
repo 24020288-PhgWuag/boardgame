@@ -64,8 +64,8 @@ window.GameRules = {
       return { valid: true, type: 'capture', reason: `Ăn được quân ${window.OTT_CONFIG.labels[targetPiece.type]} của đối phương!` };
     }
 
-    // Tấn công quân mạnh hơn: Bị thua (tự hủy)
-    return { valid: true, type: 'defeat', reason: `Quân này yếu hơn quân ${window.OTT_CONFIG.labels[targetPiece.type]} (tấn công sẽ bị tiêu diệt)!` };
+    // Tấn công quân mạnh hơn: Bị chặn
+    return { valid: true, type: 'blocked', reason: `Quân này yếu hơn quân ${window.OTT_CONFIG.labels[targetPiece.type]}!` };
   },
 
   getPossibleMoves(board, row, col, player) {
