@@ -660,8 +660,37 @@ button:active {
 }
 
 .piece-count-item .icon {
-  font-size: 16px;
   display: block;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 2px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.piece-count-item .rps-rock {
+  background-image: url('/assets/pieces/bd.png');
+}
+
+.piece-count-item .rps-blue.rps-rock {
+  background-image: url('/assets/pieces/bx.png');
+}
+
+.piece-count-item .rps-paper {
+  background-image: url('/assets/pieces/ld.png');
+}
+
+.piece-count-item .rps-blue.rps-paper {
+  background-image: url('/assets/pieces/lx.png');
+}
+
+.piece-count-item .rps-scissors {
+  background-image: url('/assets/pieces/kd.png');
+}
+
+.piece-count-item .rps-blue.rps-scissors {
+  background-image: url('/assets/pieces/kx.png');
 }
 
 .piece-count-item .label {

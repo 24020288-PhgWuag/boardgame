@@ -49,7 +49,22 @@ class BoardRenderer {
           pieceWrap.title = `${piece.player === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'} - ${window.OTT_CONFIG.fullLabels[piece.type]}`;
 
           const img = document.createElement('img');
-          img.src = `/assets/pieces/${piece.player}-${piece.type}.svg`;
+          const customImage = piece.player === 'p1' && piece.type === 'rock'
+            ? 'bd.png'
+            : piece.player === 'p2' && piece.type === 'rock'
+              ? 'bx.png'
+              : piece.player === 'p1' && piece.type === 'scissors'
+                ? 'kd.png'
+                : piece.player === 'p2' && piece.type === 'scissors'
+                  ? 'kx.png'
+                : piece.player === 'p1' && piece.type === 'paper'
+                  ? 'ld.png'
+                : piece.player === 'p2' && piece.type === 'paper'
+                  ? 'lx.png'
+                : null;
+          img.src = customImage
+            ? `/assets/pieces/${customImage}`
+            : `/assets/pieces/rps-${piece.type}.svg`;
           img.alt = piece.type;
           img.draggable = false;
           pieceWrap.appendChild(img);
