@@ -9,6 +9,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
+const BOT_TURN_LIMIT_MS = 1000;
+const BOT_MOVE_DELAY_MS = Number(process.env.BOT_MOVE_DELAY_MS || 1000);
+const port = process.env.PORT || 3000;
 
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -37,6 +40,79 @@ function broadcast(room, type, payload = {}) {
   for (const socket of room.sockets.keys()) {
     send(socket, type, payload);
   }
+}
+
+function getBotPieces(state) {
+    const pieces = [];
+    let id = 1;
+    for (let row = 0; row < state.board.length; row++) {
+      for (let col = 0; col < state.board[row].length; col++) {
+        const piece = state.board[row][col];
+        if (piece) {
+          pieces.push({
+            id: id++,
+            owner: piece.player === 'p1' ? 'WHITE' : 'BLACK',
+            type: piece.type.toUpperCase(),
+            x: col,
+            y: row,
+            is_alive: true
+          });
+        }
+      }
+    }
+    return pieces;
+}
+
+function sendBotTurn(room) {
+    if (!room || room.state.winner) return;
+    for (const [socket, role] of room.sockets.entries()) {
+      if (!socket.isBot || role !== room.state.turn) continue;
+      send(socket, 'TURN', {
+        turn_number: room.state.history.length + 1,
+        time_remaining_ms: BOT_TURN_LIMIT_MS,
+        pieces: getBotPieces(room.state),
+        history: room.state.history
+      });
+      clearTimeout(room.botTimer);
+      room.botTimer = setTimeout(() => {
+        if (room.state.winner || room.state.turn !== role) return;
+        const winner = role === 'p1' ? 'p2' : 'p1';
+        room.state.winner = winner;
+        room.state.winReason = `${role === 'p1' ? 'Bot P1' : 'Bot P2'} hết thời gian lượt đi.`;
+        broadcast(room, 'state', { state: room.state, result: 'timeout', lastPlayer: role });
+      }, BOT_TURN_LIMIT_MS);
+    }
+
+}
+
+function scheduleBotTurn(room) {
+  if (!room || room.state.winner) return;
+  clearTimeout(room.botTurnDelay);
+  room.botTurnDelay = setTimeout(() => {
+    room.botTurnDelay = null;
+    sendBotTurn(room);
+  }, BOT_MOVE_DELAY_MS);
+}
+
+function sendBotInit(socket, room, role) {
+    send(socket, 'INIT', {
+      match_id: room.code,
+      my_side: role === 'p1' ? 'WHITE' : 'BLACK',
+      map: {
+        name: 'OTT V2 9x9',
+        width: 9,
+        height: 9,
+        valid_tiles: Array.from({ length: 9 }, (_, y) =>
+          Array.from({ length: 9 }, (_, x) => [x, y])
+        ).flat(),
+        white_throne: [8, 8],
+        black_throne: [0, 0]
+      },
+      pieces: getBotPieces(room.state),
+      turn_time_limit_ms: BOT_TURN_LIMIT_MS,
+      max_turns: 0
+    });
+    scheduleBotTurn(room);
 }
 
 wss.on('connection', (socket) => {
@@ -97,8 +173,55 @@ wss.on('connection', (socket) => {
       return;
     }
 
+    if (message.type === 'bot_join') {
+      const code = String(message.code || '').trim().toUpperCase();
+      const joined = rooms.joinRoom(code, socket, 'bot');
+      if (joined.error) return send(socket, 'error', { message: joined.error });
+      if (joined.player === 'spectator') {
+        rooms.remove(socket);
+        return send(socket, 'error', { message: 'Phòng đã đủ hai người chơi bot.' });
+      }
+      socket.roomCode = joined.room.code;
+      socket.isBot = true;
+      joined.room.botNames.set(socket, String(message.name || 'bot').slice(0, 80));
+      send(socket, 'bot_joined', { code: joined.room.code, player: joined.player });
+      broadcast(joined.room, 'room-update', {
+        state: joined.room.state,
+        event: 'bot_joined',
+        player: joined.player
+      });
+      sendBotInit(socket, joined.room, joined.player);
+      return;
+    }
+
+    if (message.type === 'bot_vs_bot') {
+      const room = rooms.createRoom(message.mode || 'classic');
+      room.botProcesses = [];
+      send(socket, 'bot_match', { code: room.code, mode: room.mode });
+
+      const botScript = path.join(__dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs');
+      const botEnv = {
+        ...process.env,
+        BOT_URL: `ws://localhost:${port}`,
+        BOT_ROOM: room.code
+      };
+      const bots = [
+        { file: 'random-bot.ts', name: 'random-bot' },
+        { file: 'greedy-bot.ts', name: 'greedy-bot' }
+      ];
+      for (const bot of bots) {
+        const child = require('child_process').spawn(
+          process.execPath,
+          [botScript, path.join(__dirname, '..', bot.file)],
+          { env: { ...botEnv, BOT_NAME: bot.name }, stdio: 'ignore' }
+        );
+        room.botProcesses.push(child);
+      }
+      return;
+    }
+
     // Move piece
-    if (message.type === 'move') {
+    if (message.type === 'move' || message.type === 'bot_move') {
       const room = rooms.getRoom(socket.roomCode);
       const player = room?.sockets.get(socket);
       if (!room || !player) {
@@ -108,8 +231,13 @@ wss.on('connection', (socket) => {
         return send(socket, 'error', { message: 'Khán giả không thể thực hiện nước đi.' });
       }
 
+      if (message.type === 'bot_move' && !socket.isBot) {
+        return send(socket, 'error', { message: 'Chỉ bot mới được dùng bot_move.' });
+      }
+      if (message.type === 'bot_move') clearTimeout(room.botTimer);
       const outcome = applyMove(room.state, player, message.from, message.to);
       if (!outcome.ok) {
+        if (message.type === 'bot_move') scheduleBotTurn(room);
         return send(socket, 'error', { message: outcome.reason });
       }
 
@@ -121,6 +249,7 @@ wss.on('connection', (socket) => {
         to: message.to,
         lastPlayer: player
       });
+      scheduleBotTurn(room);
       return;
     }
 
@@ -158,6 +287,15 @@ wss.on('connection', (socket) => {
 
   socket.on('close', () => {
     const result = rooms.remove(socket);
+    if (result && result.room) {
+      clearTimeout(result.room.botTimer);
+      clearTimeout(result.room.botTurnDelay);
+      if (result.empty && result.room.botProcesses) {
+        for (const child of result.room.botProcesses) {
+          if (!child.killed) child.kill();
+        }
+      }
+    }
     if (result && !result.empty && result.room) {
       broadcast(result.room, 'room-update', {
         state: result.room.state,
@@ -169,7 +307,6 @@ wss.on('connection', (socket) => {
   });
 });
 
-const port = process.env.PORT || 3000;
 server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);

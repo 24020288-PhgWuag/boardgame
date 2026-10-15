@@ -101,6 +101,9 @@
             <button id="btn-vs-bot" class="action-button alt" type="button">
               <span>🤖</span> Đấu với Bot (AI)
             </button>
+            <button id="btn-bot-vs-bot" class="action-button alt" type="button">
+              <span>⚔️</span> Bot đấu Bot
+            </button>
             <button id="btn-pass-play" class="action-button alt" type="button">
               <span>👥</span> 2 Người (Pass & Play)
             </button>
@@ -777,6 +780,11 @@
         showGameView(data);
       });
 
+      network.on('bot_match', (data) => {
+        network.send('join', { code: data.code, role: 'spectator' });
+        showToast('Đã khởi động trận Bot đấu Bot.', 'info');
+      });
+
       network.on('room-update', (data) => {
         state = data.state;
         onStateUpdated('update');
@@ -860,6 +868,9 @@
     };
 
     $('btn-vs-bot').onclick = () => startLocalGame(true);
+    $('btn-bot-vs-bot').onclick = () => {
+      connectOnline(() => network.send('bot_vs_bot', { mode: selectedMode }));
+    };
     $('btn-pass-play').onclick = () => startLocalGame(false);
 
     $('btn-rematch').onclick = () => {

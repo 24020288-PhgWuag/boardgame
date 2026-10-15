@@ -18,7 +18,8 @@ class RoomManager {
       createdAt: Date.now(),
       state: createInitialState(mode),
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
-      spectators: new Set()
+      spectators: new Set(),
+      botNames: new Map()
     };
     this.rooms.set(code, room);
     return room;
@@ -54,6 +55,9 @@ class RoomManager {
     }
 
     room.sockets.set(socket, role);
+    if (requestedRole === 'bot' && (role === 'p1' || role === 'p2')) {
+      room.botNames.set(socket, 'bot');
+    }
     if (role === 'p1' || role === 'p2') {
       room.state.players[role] = role;
     }
@@ -107,6 +111,7 @@ class RoomManager {
         const role = room.sockets.get(socket);
         room.sockets.delete(socket);
         room.spectators.delete(socket);
+        room.botNames.delete(socket);
 
         if (role === 'p1' || role === 'p2') {
           room.state.players[role] = null;
