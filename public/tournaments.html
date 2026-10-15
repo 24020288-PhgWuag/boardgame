@@ -80,6 +80,7 @@
     const formStatus = document.getElementById('form-status');
     const uploadStatus = document.getElementById('upload-status');
     let selectedTournamentId = null;
+    const expandedTournamentIds = new Set();
 
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -126,7 +127,7 @@
         <div class="tournament-meta">${modeLabels[tournament.mode] || escapeHtml(tournament.mode)} · Vòng tròn hai lượt · ${new Date(tournament.createdAt).toLocaleString('vi-VN')}</div>
         ${tournament.error ? `<p class="muted">${escapeHtml(tournament.error)}</p>` : ''}
         <table class="standings"><thead><tr><th>Hạng</th><th>Bot</th><th>Trận</th><th>Thắng</th><th>Hòa</th><th>Thua</th><th>Điểm</th></tr></thead><tbody>${rows}</tbody></table>
-        <details ${tournament.id === selectedTournamentId ? 'open' : ''}><summary>Lịch đấu và replay</summary><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div></details>
+        <details ${expandedTournamentIds.has(tournament.id) ? 'open' : ''}><summary>Lịch đấu và replay</summary><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div></details>
       </article>`;
     }
 
@@ -140,6 +141,11 @@
       }
       const selected = selectedTournamentId && tournaments.find(item => item.id === selectedTournamentId);
       const ids = selected ? [selected, ...tournaments.filter(item => item.id !== selectedTournamentId)] : tournaments;
+      for (const item of tournamentList.querySelectorAll('.tournament-item')) {
+        const id = item.dataset.tournamentId;
+        if (item.querySelector('details')?.open) expandedTournamentIds.add(id);
+        else expandedTournamentIds.delete(id);
+      }
       tournamentList.innerHTML = ids.map(renderTournament).join('');
     }
 
@@ -158,6 +164,7 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Không thể tạo giải đấu.');
         selectedTournamentId = data.tournament.id;
+        expandedTournamentIds.add(data.tournament.id);
         formStatus.textContent = 'Giải đã bắt đầu. Các trận lần lượt được tự động thi đấu.';
         await loadTournaments();
       } catch (error) {
