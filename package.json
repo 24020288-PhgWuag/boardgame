@@ -6,7 +6,10 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "bot:match": "node src/botMatch.js",
+    "bot:tournament": "node src/runTournament.js",
+    "replay": "node src/replayMatch.js"
   },
   "dependencies": {
     "express": "^4.21.2",

@@ -3,7 +3,7 @@ const TYPES = ['rock', 'paper', 'scissors'];
 const TYPES_VI = { rock: 'Đấm (Búa)', paper: 'Lá (Bao)', scissors: 'Kéo' };
 const beats = { rock: 'scissors', scissors: 'paper', paper: 'rock' };
 
-function createInitialState(mode = 'classic') {
+function createInitialState(mode = 'army') {
   const board = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(null));
 
   if (mode === 'tactical') {
@@ -39,6 +39,16 @@ function createInitialState(mode = 'classic') {
     board[7][8] = { player: 'p2', type: 'scissors' };
   }
 
+  const pieceNumbers = { p1: 0, p2: 0 };
+  for (const row of board) {
+    for (const piece of row) {
+      if (piece) {
+        pieceNumbers[piece.player]++;
+        piece.id = `${piece.player}-piece-${pieceNumbers[piece.player]}`;
+      }
+    }
+  }
+
   const initialCounts = countPieces(board);
 
   return {
@@ -72,6 +82,30 @@ function countPieces(board) {
     }
   }
   return counts;
+}
+
+function createBotSnapshot(state) {
+  return {
+    board: state.board.map(row => row.map(piece => piece ? { ...piece } : null)),
+    boardSize: { rows: BOARD_SIZE, cols: BOARD_SIZE },
+    entities: state.board.flatMap((row, rowIndex) => row.flatMap((piece, colIndex) => {
+      if (!piece) return [];
+      return [{
+        id: piece.id || `${piece.player}-${piece.type}-${rowIndex}-${colIndex}`,
+        kind: 'piece',
+        player: piece.player,
+        type: piece.type,
+        position: { row: rowIndex, col: colIndex }
+      }];
+    })),
+    terrain: [],
+    turn: state.turn,
+    winner: state.winner,
+    winReason: state.winReason,
+    players: { ...state.players },
+    mode: state.mode,
+    counts: JSON.parse(JSON.stringify(state.counts))
+  };
 }
 
 function validateMove(state, player, from, to) {
@@ -204,8 +238,12 @@ function applyMove(state, player, from, to) {
     state.counts = countPieces(state.board);
   }
 
-  // Đổi lượt
-  state.turn = player === 'p1' ? 'p2' : 'p1';
+  // Đổi lượt chỉ khi trận đấu chưa kết thúc.
+  if (!state.winner) {
+    state.turn = player === 'p1' ? 'p2' : 'p1';
+  } else {
+    state.turn = player;
+  }
 
   return {
     ok: true,
@@ -223,5 +261,6 @@ module.exports = {
   createInitialState,
   validateMove,
   applyMove,
-  countPieces
+  countPieces,
+  createBotSnapshot
 };

@@ -13,13 +13,13 @@
   <main class="app-shell">
     <!-- Top Navigation Bar -->
     <header class="topbar">
-      <div class="brand">
+      <a class="brand" href="/" aria-label="Về sảnh chính" title="Về sảnh chính">
         <span class="brand-mark">O</span>
         <div>
           <strong>OTT V2</strong>
           <small>TACTICAL ARENA // 9x9</small>
         </div>
-      </div>
+      </a>
       <div class="topbar-actions">
         <button id="rules-btn" class="nav-btn" type="button" title="Xem luật chơi">
           <span>📖</span> Luật chơi
@@ -70,9 +70,9 @@
           <div class="mode-selector">
             <label>CHỌN CHẾ ĐỘ QUÂN SỐ:</label>
             <div class="mode-options">
-              <button type="button" class="mode-btn active" data-mode="classic" title="Mỗi bên 1 Đấm, 1 Lá, 1 Kéo (3v3 nhanh gọn)">3v3 Nhanh</button>
+              <button type="button" class="mode-btn" data-mode="classic" title="Mỗi bên 1 Đấm, 1 Lá, 1 Kéo (3v3 nhanh gọn)">3v3 Nhanh</button>
               <button type="button" class="mode-btn" data-mode="tactical" title="Mỗi bên 2 Đấm, 2 Lá, 2 Kéo (6v6 chiến thuật)">6v6 Chiến thuật</button>
-              <button type="button" class="mode-btn" data-mode="army" title="Mỗi bên 3 Đấm, 3 Lá, 3 Kéo (9v9 đại chiến)">9v9 Đại chiến</button>
+              <button type="button" class="mode-btn active" data-mode="army" title="Mỗi bên 3 Đấm, 3 Lá, 3 Kéo (9v9 đại chiến)">9v9 Đại chiến</button>
             </div>
           </div>
 
@@ -99,9 +99,18 @@
             <button id="btn-vs-bot" class="action-button alt" type="button">
               <span>🤖</span> Đấu với Bot (AI)
             </button>
+            <button id="btn-bot-vs-bot" class="action-button alt" type="button">
+              <span>⚔️</span> Bot đấu Bot
+            </button>
             <button id="btn-pass-play" class="action-button alt" type="button">
               <span>👥</span> 2 Người (Pass & Play)
             </button>
+            <a class="action-button alt" href="/replay.html">
+              <span>🎬</span> Xem replay
+            </a>
+            <a class="action-button alt" href="/tournaments.html">
+              <span>🏆</span> Bot Tournament
+            </a>
           </div>
         </div>
 
@@ -150,7 +159,7 @@
             <div class="player-header">
               <span class="player-badge">P1</span>
               <div class="player-info">
-                <strong>Đội Đỏ (Căn cứ A1)</strong>
+                <strong><span id="p1-name">Đội Đỏ</span> (Căn cứ A1)</strong>
                 <small id="p1-state">Chờ kết nối</small>
                 <span id="p1-role-badge" class="role-tag is-opponent">ĐỐI THỦ</span>
               </div>
@@ -191,18 +200,14 @@
               <span class="turn-title">LƯỢT HIỆN TẠI</span>
               <div id="turn-label" class="turn-desc">Đang chờ lượt...</div>
             </div>
-            <div id="turn-timer-badge" class="nav-btn" style="font-family:'DM Mono';">30s</div>
-          </div>
-
-          <!-- Quick Rules Summary Banner -->
-          <div class="quick-rules-bar">
-            <span>✊ <strong>Đấm</strong> ăn ✌️ <strong>Kéo</strong></span>
-            <span>•</span>
-            <span>✌️ <strong>Kéo</strong> ăn ✋ <strong>Lá</strong></span>
-            <span>•</span>
-            <span>✋ <strong>Lá</strong> ăn ✊ <strong>Đấm</strong></span>
-            <span>•</span>
-            <span>🛡️ Cùng loại: <strong>Chặn đường</strong></span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <select id="live-bot-speed" class="nav-btn hidden" aria-label="Tốc độ bot">
+                <option value="slow">Chậm</option>
+                <option value="medium" selected>Vừa</option>
+                <option value="fast">Nhanh</option>
+              </select>
+              <div id="turn-timer-badge" class="nav-btn" style="font-family:'DM Mono';">30s</div>
+            </div>
           </div>
 
           <!-- 9x9 Board with Coordinates -->
@@ -230,7 +235,7 @@
             <div class="player-header">
               <span class="player-badge">P2</span>
               <div class="player-info">
-                <strong>Đội Xanh (Căn cứ I9)</strong>
+                <strong><span id="p2-name">Đội Xanh</span> (Căn cứ I9)</strong>
                 <small id="p2-state">Chờ kết nối</small>
                 <span id="p2-role-badge" class="role-tag is-opponent">ĐỐI THỦ</span>
               </div>
@@ -270,22 +275,46 @@
             </ul>
           </div>
 
-          <!-- Quick Chat & Emotes -->
-          <div class="panel-card chat-panel">
-            <h3>Tin nhắn nhanh</h3>
-            <div class="quick-chat-options">
-              <button type="button" class="chat-pill" data-text="Chào bạn! Chúc trận đấu vui vẻ!">👋 Chào bạn!</button>
-              <button type="button" class="chat-pill" data-text="Nước đi hay đấy!">🔥 Nước hay!</button>
-              <button type="button" class="chat-pill" data-text="Cẩn thận căn cứ nhé!">🎯 Cẩn thận!</button>
-              <button type="button" class="chat-pill" data-text="Gỡ lại ván sau nhé!">💪 Quyết chiến!</button>
-            </div>
-          </div>
         </aside>
       </div>
     </section>
   </main>
 
   <!-- 3. MODALS -->
+  <div id="bot-match-modal" class="modal hidden">
+    <div class="modal-card">
+      <p class="eyebrow">BOT ĐẤU BOT</p>
+      <h2>Thiết lập trận đấu</h2>
+      <p class="modal-reason">Chọn bot cho từng bên.</p>
+      <div style="display:grid; gap:14px; text-align:left; margin:20px 0;">
+        <label>
+          <strong>Thêm bot Python của bạn</strong>
+          <input id="bot-upload-input" type="file" accept=".py,text/x-python" style="width:100%; margin-top:6px;">
+          <button id="bot-upload-btn" class="action-button alt" type="button" style="margin-top:8px;">Tải bot lên</button>
+          <small id="bot-upload-status" style="display:block; margin-top:6px;"></small>
+        </label>
+        <label>
+          <strong>Bot P1 (Đỏ)</strong>
+          <select id="bot-p1-select" class="form-control" style="width:100%; margin-top:6px;">
+            <option value="minimax">Minimax</option>
+            <option value="random">Random</option>
+          </select>
+        </label>
+        <label>
+          <strong>Bot P2 (Xanh)</strong>
+          <select id="bot-p2-select" class="form-control" style="width:100%; margin-top:6px;">
+            <option value="random">Random</option>
+            <option value="minimax">Minimax</option>
+          </select>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="start-bot-match-btn" class="primary-button" type="button">Bắt đầu trận</button>
+        <button id="cancel-bot-match-btn" class="action-button alt" type="button">Hủy</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Victory / Game Over Modal -->
   <div id="result-modal" class="modal hidden">
     <div class="modal-card">
@@ -311,7 +340,7 @@
           <span>🔄</span>
         </button>
         <button id="close-modal" class="action-button alt" type="button">
-          <span>Về phòng chờ</span>
+          <span>Đóng kết quả</span>
         </button>
       </div>
     </div>
@@ -393,9 +422,11 @@
     // Game state
     let player = 'p1';
     let state = null;
-    let selectedMode = 'classic';
+    let selectedMode = 'army';
     let isLocalGame = false;
     let isBotGame = false;
+    let isBotMatch = false;
+    let botMatchOptions = null;
     let gameTimer = null;
     let timeLeft = 30;
 
@@ -451,7 +482,7 @@
 
     // State update handler
     function onStateUpdated(result, capturedPiece, from, to) {
-      renderer.render(state);
+      renderer.render(state, to);
       boardView.setState(state, isLocalGame ? 'local' : player);
       updateHUD();
 
@@ -466,8 +497,8 @@
       }
 
       // Check Base capture
-      if ((to.row === 8 && to.col === 8 && state.board[8][8]?.player === 'p1') ||
-          (to.row === 0 && to.col === 0 && state.board[0][0]?.player === 'p2')) {
+      if (to && ((to.row === 8 && to.col === 8 && state.board[8][8]?.player === 'p1') ||
+          (to.row === 0 && to.col === 0 && state.board[0][0]?.player === 'p2'))) {
         const baseCell = renderer.getCell(to.row, to.col);
         sound.playBaseAlert();
         vfx.playBaseCapture(baseCell, state.winner);
@@ -508,16 +539,16 @@
         $('p1-state').textContent = 'Đang chơi tại máy';
         $('p2-state').textContent = isBotGame ? 'Máy (Bot AI)' : 'Đang chơi tại máy';
       } else {
-        $('p1-state').textContent = state.players.p1 ? 'Đã sẵn sàng' : 'Chờ kết nối...';
-        $('p2-state').textContent = state.players.p2 ? 'Đã sẵn sàng' : 'Chờ kết nối...';
+        $('p1-state').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Python Bot' : (state.players.p1 ? 'Đã sẵn sàng' : 'Chờ kết nối...');
+        $('p2-state').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Python Bot' : (isBotGame ? 'Máy (Python Bot)' : (state.players.p2 ? 'Đã sẵn sàng' : 'Chờ kết nối...'));
       }
 
       // Role badges
       if (!isLocalGame) {
         $('p1-role-badge').textContent = player === 'p1' ? 'BẠN' : 'ĐỐI THỦ';
         $('p1-role-badge').className = `role-tag ${player === 'p1' ? 'is-you' : 'is-opponent'}`;
-        $('p2-role-badge').textContent = player === 'p2' ? 'BẠN' : 'ĐỐI THỦ';
-        $('p2-role-badge').className = `role-tag ${player === 'p2' ? 'is-you' : 'is-opponent'}`;
+        $('p2-role-badge').textContent = isBotMatch ? 'BOT P2' : (isBotGame ? 'PYTHON BOT' : (player === 'p2' ? 'BẠN' : 'ĐỐI THỦ'));
+        $('p2-role-badge').className = 'role-tag is-opponent';
       } else {
         $('p1-role-badge').textContent = 'NGƯỜI CHƠI 1';
         $('p2-role-badge').textContent = isBotGame ? 'BOT AI' : 'NGƯỜI CHƠI 2';
@@ -571,9 +602,11 @@
 
     // Modal display
     function showResultModal(winner, reason) {
-      const isWinner = isLocalGame ? true : (winner === player);
+      const isWinner = isBotMatch ? false : (isLocalGame ? true : (winner === player));
       $('result-icon').textContent = isWinner ? '🏆' : '💔';
-      $('result-title').textContent = isWinner ? (isLocalGame ? `${winner === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'} Thắng!` : 'Bạn Thắng Trận!') : 'Bạn Thua Trận';
+      $('result-title').textContent = isBotMatch
+        ? `${winner === 'p1' ? botMatchOptions?.botP1Name || 'Bot P1' : botMatchOptions?.botP2Name || 'Bot P2'} Thắng!`
+        : (isWinner ? (isLocalGame ? `${winner === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'} Thắng!` : 'Bạn Thắng Trận!') : 'Bạn Thua Trận');
       $('result-title').style.color = isWinner ? '#2a9d8f' : '#d32f2f';
       $('result-reason').textContent = reason || 'Trận đấu kết thúc!';
 
@@ -617,6 +650,13 @@
     function showGameView(data) {
       player = data.player || player;
       state = data.state;
+      isBotGame = Boolean(data.bot);
+      isBotMatch = Boolean(data.botMatch);
+      botMatchOptions = data.botMatchOptions || null;
+      $('p1-name').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Bot P1' : 'Đội Đỏ';
+      $('p2-name').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Bot P2' : 'Đội Xanh';
+      $('live-bot-speed').classList.toggle('hidden', !isBotMatch);
+      if (botMatchOptions?.speed) $('live-bot-speed').value = botMatchOptions.speed;
       $('lobby').classList.add('hidden');
       $('game').classList.remove('hidden');
       $('room-label').textContent = data.code || 'LOCAL';
@@ -674,7 +714,7 @@
     }
 
     // Client-side local move engine (for local / bot games)
-    function createInitialClientState(mode = 'classic') {
+    function createInitialClientState(mode = 'army') {
       const board = Array.from({ length: 9 }, () => Array(9).fill(null));
       if (mode === 'tactical') {
         board[0][0] = { player: 'p1', type: 'rock' };
@@ -814,6 +854,11 @@
         onStateUpdated(data.result, data.capturedPiece, data.from, data.to);
       });
 
+      network.on('bot-speed-updated', (data) => {
+        $('live-bot-speed').value = data.speed;
+        showToast(`Tốc độ: ${data.speed === 'slow' ? 'Chậm' : data.speed === 'fast' ? 'Nhanh' : 'Vừa'}`, 'info');
+      });
+
       network.on('rematch', (data) => {
         state = data.state;
         $('result-modal').classList.add('hidden');
@@ -886,7 +931,74 @@
       joinByCode(code);
     };
 
-    $('btn-vs-bot').onclick = () => startLocalGame(true);
+    $('btn-vs-bot').onclick = () => {
+      connectOnline(() => {
+        network.send('create', { mode: selectedMode, bot: true });
+      });
+    };
+    function addUploadedBot(bot) {
+      ['bot-p1-select', 'bot-p2-select'].forEach(id => {
+        const select = $(id);
+        if (!select.querySelector(`option[value="${bot.id}"]`)) {
+          select.add(new Option(`Của tôi: ${bot.name}`, bot.id));
+        }
+      });
+    }
+
+    async function loadUploadedBots() {
+      const response = await fetch('/api/bots');
+      if (!response.ok) throw new Error('Không thể tải danh sách bot.');
+      const data = await response.json();
+      data.bots.forEach(addUploadedBot);
+    }
+
+    $('btn-bot-vs-bot').onclick = () => {
+      $('bot-match-modal').classList.remove('hidden');
+      loadUploadedBots().catch(error => {
+        $('bot-upload-status').textContent = error.message;
+      });
+    };
+    $('live-bot-speed').onchange = () => {
+      if (isBotMatch && network) network.send('set_bot_match_speed', { speed: $('live-bot-speed').value });
+    };
+    $('cancel-bot-match-btn').onclick = () => $('bot-match-modal').classList.add('hidden');
+    $('bot-upload-btn').onclick = async () => {
+      const input = $('bot-upload-input');
+      const file = input.files[0];
+      if (!file) {
+        $('bot-upload-status').textContent = 'Hãy chọn file .py trước.';
+        return;
+      }
+      if (!file.name.toLowerCase().endsWith('.py')) {
+        $('bot-upload-status').textContent = 'Chỉ chấp nhận file Python .py.';
+        return;
+      }
+      try {
+        const source = await file.text();
+        const response = await fetch('/api/bots', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, source })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Tải bot thất bại.');
+        addUploadedBot(data.bot);
+        $('bot-upload-status').textContent = `Đã tải ${data.bot.name}.`;
+        input.value = '';
+      } catch (error) {
+        $('bot-upload-status').textContent = error.message;
+      }
+    };
+    $('start-bot-match-btn').onclick = () => {
+      const options = {
+        mode: selectedMode,
+        botP1: $('bot-p1-select').value,
+        botP2: $('bot-p2-select').value,
+        speed: 'medium'
+      };
+      $('bot-match-modal').classList.add('hidden');
+      connectOnline(() => network.send('create_bot_match', options));
+    };
     $('btn-pass-play').onclick = () => startLocalGame(false);
 
     $('btn-rematch').onclick = () => {
@@ -901,7 +1013,10 @@
     };
 
     $('modal-rematch-btn').onclick = () => $('btn-rematch').click();
-    $('close-modal').onclick = () => location.reload();
+    $('close-modal').onclick = () => {
+      $('result-modal').classList.add('hidden');
+      if (isBotMatch) showToast('Đã đóng thông báo kết quả.', 'info');
+    };
     $('btn-leave').onclick = () => location.reload();
 
     $('copy-code-btn').onclick = () => {
@@ -926,18 +1041,6 @@
     $('rules-btn').onclick = () => $('rules-modal').classList.remove('hidden');
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
-
-    // Quick Chat buttons
-    document.querySelectorAll('.chat-pill').forEach(btn => {
-      btn.onclick = () => {
-        const text = btn.dataset.text;
-        if (network && !isLocalGame) {
-          network.send('chat', { text });
-        } else {
-          showToast(`💬 Bạn: "${text}"`, 'info');
-        }
-      };
-    });
 
     // Auto connect and join from URL query (?room=CODE)
     window.addEventListener('DOMContentLoaded', () => {

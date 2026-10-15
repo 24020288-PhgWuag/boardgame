@@ -1,14 +1,112 @@
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const RoomManager = require('./roomManager');
-const { applyMove } = require('./gameState');
+const BotProcess = require('./botProcess');
+const { applyMove, createBotSnapshot } = require('./gameState');
+const { createReplay, saveReplay } = require('./replay');
+const { runMatch } = require('./matchRunner');
+const TournamentManager = require('./tournamentManager');
 
 const app = express();
+app.use(express.json({ limit: '256kb' }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
+const BOT_MATCH_SPEEDS = {
+  slow: 1500,
+  medium: 900,
+  fast: 250
+};
+const BOT_MATCH_SCRIPTS = {
+  random: 'bots/random_bot.py',
+  minimax: 'bots/minimax_bot.py'
+};
+const UPLOAD_DIR = path.join(__dirname, '..', 'bots', 'uploads');
+const SUBMISSION_DIR = path.join(__dirname, '..', 'bots', 'submissions');
+const TOURNAMENT_DIR = path.join(__dirname, '..', 'matches', 'tournaments');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(SUBMISSION_DIR, { recursive: true });
+
+function getUploadedBot(botId) {
+  if (typeof botId !== 'string' || !botId.startsWith('uploaded:')) return null;
+  const filename = botId.slice('uploaded:'.length);
+  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) return null;
+  const filePath = path.join(UPLOAD_DIR, filename);
+  return fs.existsSync(filePath) ? filePath : null;
+}
+
+function getBotDefinition(botId) {
+  let script = null;
+  let name = null;
+  let sha256 = null;
+  if (Object.prototype.hasOwnProperty.call(BOT_MATCH_SCRIPTS, botId)) {
+    script = path.join(__dirname, '..', BOT_MATCH_SCRIPTS[botId]);
+    name = getBotDisplayName(botId);
+  } else if (typeof botId === 'string' && /^submission:[a-f0-9-]{36}$/i.test(botId)) {
+    const id = botId.slice('submission:'.length);
+    script = path.join(SUBMISSION_DIR, `${id}.py`);
+    const metaPath = path.join(SUBMISSION_DIR, `${id}.json`);
+    if (!fs.existsSync(script) || !fs.existsSync(metaPath)) return null;
+    const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+    name = metadata.name;
+    sha256 = metadata.sha256;
+  } else {
+    script = getUploadedBot(botId);
+    if (!script) return null;
+    name = getBotDisplayName(botId);
+  }
+  if (!fs.existsSync(script)) return null;
+  sha256 ||= crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
+  return { id: botId, name, script, sha256 };
+}
+
+const tournaments = new TournamentManager(TOURNAMENT_DIR, {
+  resolveBot: getBotDefinition,
+  runMatch
+});
+
+function getBotDisplayName(botId) {
+  if (botId === 'minimax') return 'Minimax Bot';
+  if (botId === 'random') return 'Random Bot';
+  return botId.replace(/^uploaded:/, '').replace(/\.py$/, '');
+}
+
+function replayNamePart(name) {
+  return String(name || 'bot')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase() || 'bot';
+}
+
+function replayTimestamp(date = new Date()) {
+  return date.toISOString()
+    .replace(/[-:]/g, '')
+    .replace('T', '-')
+    .replace(/\.\d{3}Z$/, '');
+}
+
+function saveBotMatchReplay(room) {
+  if (!room?.botMatch || room.botMatch.replaySaved || !room.state.winner) return;
+  const result = {
+    winner: room.state.winner,
+    reason: room.state.winReason,
+    bot_p1: room.botMatch.botP1Name,
+    bot_p2: room.botMatch.botP2Name
+  };
+  const replay = createReplay(room.mode, room.botMatch.initialState, room.state.history, result);
+  replay.players = { p1: room.botMatch.botP1Name, p2: room.botMatch.botP2Name };
+  replay.speed = room.botMatch.speed;
+  const filename = `${replayNamePart(room.botMatch.botP1Name)}-${replayNamePart(room.botMatch.botP2Name)}-${replayTimestamp()}.json`;
+  room.botMatch.replayFile = saveReplay(replay, path.join(__dirname, '..', 'matches', filename));
+  room.botMatch.replaySaved = true;
+  console.log(`Saved bot match replay: ${room.botMatch.replayFile}`);
+}
 
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -26,6 +124,117 @@ app.get('/api/rooms', (req, res) => {
   res.json({ rooms: rooms.getPublicRooms() });
 });
 
+app.get('/api/bots', (req, res) => {
+  const bots = [
+    ...Object.keys(BOT_MATCH_SCRIPTS).map(id => ({ id, name: getBotDisplayName(id), builtin: true })),
+    ...fs.readdirSync(UPLOAD_DIR)
+    .filter(file => /^[a-zA-Z0-9_-]+\.py$/.test(file))
+    .map(file => ({ id: `uploaded:${file}`, name: file.replace(/\.py$/i, ''), legacy: true })),
+    ...fs.readdirSync(SUBMISSION_DIR)
+      .filter(file => /^[a-f0-9-]{36}\.json$/i.test(file))
+      .map(file => {
+        const metadata = JSON.parse(fs.readFileSync(path.join(SUBMISSION_DIR, file), 'utf8'));
+        return { id: `submission:${file.slice(0, -5)}`, name: metadata.name, sha256: metadata.sha256 };
+      })
+  ];
+  res.json({ bots });
+});
+
+app.post('/api/bots', (req, res) => {
+  const filename = String(req.body?.filename || '');
+  const source = req.body?.source;
+  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
+    return res.status(400).json({ error: 'Tên bot phải kết thúc bằng .py và chỉ chứa chữ, số, _, -.' });
+  }
+  if (typeof source !== 'string' || !source.trim()) {
+    return res.status(400).json({ error: 'File bot không được để trống.' });
+  }
+  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) {
+    return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
+  }
+  const id = crypto.randomUUID();
+  const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+  const safeName = String(req.body?.name || filename.replace(/\.py$/i, '')).trim().slice(0, 60) || 'Python Bot';
+  const metadata = { id, name: safeName, originalFilename: filename, sha256, createdAt: new Date().toISOString() };
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${id}.py`), source, { encoding: 'utf8', flag: 'wx' });
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${id}.json`), `${JSON.stringify(metadata, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  res.status(201).json({ bot: { id: `submission:${id}`, name: safeName, sha256 } });
+});
+
+app.get('/api/tournaments', (req, res) => {
+  res.json({ tournaments: tournaments.list().map(({ bots, matches, ...item }) => ({
+    ...item,
+    matches,
+    botCount: bots.length,
+    matchCount: matches.length,
+    completedMatches: matches.filter(match => match.status === 'completed').length,
+    standings: tournaments.standings({ bots, matches })
+  })) });
+});
+
+app.post('/api/tournaments', (req, res) => {
+  const mode = req.body?.mode;
+  const maxTurns = Number(req.body?.maxTurns || 300);
+  if (!['classic', 'tactical', 'army'].includes(mode)) {
+    return res.status(400).json({ error: 'Hãy chọn chế độ chơi hợp lệ.' });
+  }
+  if (!Number.isInteger(maxTurns) || maxTurns < 20 || maxTurns > 2000) {
+    return res.status(400).json({ error: 'Giới hạn lượt phải từ 20 đến 2000.' });
+  }
+  try {
+    const tournament = tournaments.create({
+      name: req.body?.name,
+      botIds: req.body?.botIds,
+      mode,
+      maxTurns
+    });
+    const { bots, ...publicTournament } = tournament;
+    res.status(201).json({ tournament: {
+      ...publicTournament,
+      bots: bots.map(({ script, ...bot }) => bot),
+      standings: tournaments.standings(tournament)
+    } });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get('/api/tournaments/:id', (req, res) => {
+  const tournament = tournaments.read(req.params.id);
+  if (!tournament) return res.status(404).json({ error: 'Tournament not found.' });
+  const { bots, ...publicTournament } = tournament;
+  res.json({ tournament: {
+    ...publicTournament,
+    bots: bots.map(({ script, ...bot }) => bot),
+    standings: tournaments.standings(tournament)
+  } });
+});
+
+app.get('/api/replays', (req, res) => {
+  const replayDir = path.join(__dirname, '..', 'matches');
+  if (!fs.existsSync(replayDir)) return res.json({ replays: [] });
+  const tournamentReplayDir = path.join(TOURNAMENT_DIR, 'replays');
+  const files = fs.readdirSync(replayDir).filter(file => file.endsWith('.json'));
+  if (fs.existsSync(tournamentReplayDir)) files.push(...fs.readdirSync(tournamentReplayDir).filter(file => file.endsWith('.json')));
+  const replays = [...new Set(files)]
+    .map(file => ({ file, path: `/api/replays/${encodeURIComponent(file)}` }));
+  res.json({ replays });
+});
+
+app.get('/api/replays/:file', (req, res) => {
+  const file = path.basename(req.params.file);
+  if (!file.endsWith('.json')) {
+    return res.status(400).json({ error: 'Replay file không hợp lệ.' });
+  }
+  const replayPath = path.join(__dirname, '..', 'matches', file);
+  const tournamentReplayPath = path.join(TOURNAMENT_DIR, 'replays', file);
+  const resolvedReplayPath = fs.existsSync(replayPath) ? replayPath : tournamentReplayPath;
+  if (!fs.existsSync(resolvedReplayPath)) {
+    return res.status(404).json({ error: 'Không tìm thấy replay.' });
+  }
+  res.sendFile(resolvedReplayPath);
+});
+
 function send(socket, type, payload = {}) {
   if (socket && socket.readyState === 1) {
     socket.send(JSON.stringify({ type, ...payload }));
@@ -37,6 +246,125 @@ function broadcast(room, type, payload = {}) {
   for (const socket of room.sockets.keys()) {
     send(socket, type, payload);
   }
+}
+
+function broadcastState(room, outcome, from, to, player) {
+  broadcast(room, 'state', {
+    state: room.state,
+    result: outcome.result,
+    capturedPiece: outcome.capturedPiece,
+    from,
+    to,
+    lastPlayer: player
+  });
+}
+
+function forfeitBot(room, reason) {
+  if (!room || room.state.winner) return;
+  room.bot?.stop();
+  room.state.winner = 'p1';
+  room.state.winReason = `Bot đã bị xử thua: ${reason}`;
+  room.state.turn = 'p1';
+  broadcast(room, 'state', {
+    state: room.state,
+    result: 'forfeit',
+    lastPlayer: 'p2'
+  });
+}
+
+function forfeitBotMatch(room, player, reason) {
+  if (!room || room.state.winner) return;
+  room.botMatch?.p1?.stop();
+  room.botMatch?.p2?.stop();
+  room.state.winner = player === 'p1' ? 'p2' : 'p1';
+  room.state.winReason = `${player === 'p1' ? 'Bot P1' : 'Bot P2'} bị xử thua: ${reason}`;
+  room.state.turn = room.state.winner;
+  broadcast(room, 'state', {
+    state: room.state,
+    result: 'forfeit',
+    lastPlayer: player
+  });
+  saveBotMatchReplay(room);
+}
+
+async function requestBotTurn(room) {
+  if (!room?.bot || room.state.winner || room.state.turn !== 'p2') return;
+
+  try {
+    const response = await room.bot.request({
+      protocol_version: 1,
+      type: 'your_turn',
+      match_id: room.code,
+      player: 'p2',
+      turn: room.state.history.length + 1,
+      ruleset: `${room.mode}-v1`,
+      state: createBotSnapshot(room.state),
+      time_limit_ms: room.bot.timeoutMs
+    });
+
+    const action = response?.action;
+    if (!action || action.type !== 'move') {
+      return forfeitBot(room, response?.message || 'Bot không trả về một nước đi hợp lệ.');
+    }
+
+    const from = action.from;
+    const to = action.to;
+    const outcome = applyMove(room.state, 'p2', from, to);
+    if (!outcome.ok) {
+      return forfeitBot(room, outcome.reason);
+    }
+
+    broadcastState(room, outcome, from, to, 'p2');
+  } catch (error) {
+    console.error(`Bot failure in room ${room.code}:`, error.message);
+    forfeitBot(room, error.message);
+  }
+}
+
+async function requestBotMatchTurn(room) {
+  if (!room?.botMatch || room.state.winner) return;
+  const player = room.state.turn;
+  const bot = room.botMatch[player];
+  if (!bot) return;
+
+  try {
+    const response = await bot.request({
+      protocol_version: 1,
+      type: 'your_turn',
+      match_id: room.code,
+      player,
+      turn: room.state.history.length + 1,
+      ruleset: `${room.mode}-v1`,
+      state: createBotSnapshot(room.state),
+      time_limit_ms: bot.timeoutMs
+    });
+    const action = response?.action;
+    if (!action || action.type !== 'move') {
+      return forfeitBotMatch(room, player, response?.message || 'Bot không trả về nước đi.');
+    }
+
+    const outcome = applyMove(room.state, player, action.from, action.to);
+    if (!outcome.ok) return forfeitBotMatch(room, player, outcome.reason);
+
+    broadcastState(room, outcome, action.from, action.to, player);
+    if (!room.state.winner) {
+      scheduleBotMatchTurn(room);
+    } else {
+      saveBotMatchReplay(room);
+    }
+  } catch (error) {
+    console.error(`Bot match failure in room ${room.code}:`, error.message);
+    forfeitBotMatch(room, player, error.message);
+  }
+}
+
+function scheduleBotMatchTurn(room) {
+  if (!room?.botMatch || room.state.winner) return;
+  clearTimeout(room.botMatch.timer);
+  room.botMatch.timer = setTimeout(() => {
+    room.botMatch.timer = null;
+    requestBotMatchTurn(room);
+  }, room.botMatch.delayMs);
 }
 
 wss.on('connection', (socket) => {
@@ -62,16 +390,93 @@ wss.on('connection', (socket) => {
 
     // Create room
     if (message.type === 'create') {
-      const mode = message.mode || 'classic';
+      const mode = message.mode || 'army';
       const room = rooms.createRoom(mode);
       const joined = rooms.joinRoom(room.code, socket);
       socket.roomCode = room.code;
+      if (message.bot === true) {
+        room.bot = new BotProcess({
+          cwd: path.join(__dirname, '..'),
+          onError: error => console.error(`Bot process error in room ${room.code}:`, error.message)
+        });
+        room.bot.start();
+        room.state.players.p2 = 'p2';
+      }
       send(socket, 'joined', {
         code: room.code,
         player: joined.player,
         state: room.state,
-        mode: room.mode
+        mode: room.mode,
+        bot: Boolean(room.bot)
       });
+      return;
+    }
+
+    if (message.type === 'create_bot_match') {
+      const mode = message.mode || 'army';
+      const botP1Definition = getBotDefinition(message.botP1) || getBotDefinition('minimax');
+      const botP2Definition = getBotDefinition(message.botP2) || getBotDefinition('random');
+      const botP1 = botP1Definition.id;
+      const botP2 = botP2Definition.id;
+      const speed = Object.prototype.hasOwnProperty.call(BOT_MATCH_SPEEDS, message.speed)
+        ? message.speed
+        : 'medium';
+      const room = rooms.createRoom(mode);
+      const joined = rooms.joinRoom(room.code, socket, 'spectator');
+      socket.roomCode = room.code;
+      room.state.players = { p1: 'bot-p1', p2: 'bot-p2' };
+      room.botMatch = {
+        botP1,
+        botP2,
+        botP1Name: botP1Definition.name,
+        botP2Name: botP2Definition.name,
+        speed,
+        delayMs: BOT_MATCH_SPEEDS[speed],
+        timer: null,
+        initialState: JSON.parse(JSON.stringify(room.state)),
+        replaySaved: false,
+        p1: new BotProcess({
+          cwd: path.join(__dirname, '..'),
+          script: botP1Definition.script,
+          onError: error => console.error(`Bot P1 error in room ${room.code}:`, error.message)
+        }),
+        p2: new BotProcess({
+          cwd: path.join(__dirname, '..'),
+          script: botP2Definition.script,
+          onError: error => console.error(`Bot P2 error in room ${room.code}:`, error.message)
+        })
+      };
+      room.botMatch.p1.start();
+      room.botMatch.p2.start();
+      send(socket, 'joined', {
+        code: room.code,
+        player: joined.player,
+        state: room.state,
+        mode: room.mode,
+        botMatch: true,
+        botMatchOptions: {
+          botP1,
+          botP2,
+          speed,
+          botP1Name: room.botMatch.botP1Name,
+          botP2Name: room.botMatch.botP2Name
+        }
+      });
+      requestBotMatchTurn(room);
+      return;
+    }
+
+    if (message.type === 'set_bot_match_speed') {
+      const room = rooms.getRoom(socket.roomCode);
+      if (!room?.botMatch || room.sockets.get(socket) !== 'spectator') return;
+      if (!Object.prototype.hasOwnProperty.call(BOT_MATCH_SPEEDS, message.speed)) {
+        return send(socket, 'error', { message: 'Tốc độ bot không hợp lệ.' });
+      }
+      room.botMatch.speed = message.speed;
+      room.botMatch.delayMs = BOT_MATCH_SPEEDS[message.speed];
+      broadcast(room, 'bot-speed-updated', { speed: message.speed });
+      if (room.state.winner) return;
+      scheduleBotMatchTurn(room);
       return;
     }
 
@@ -108,19 +513,20 @@ wss.on('connection', (socket) => {
         return send(socket, 'error', { message: 'Khán giả không thể thực hiện nước đi.' });
       }
 
-      const outcome = applyMove(room.state, player, message.from, message.to);
+      const outcome = applyMove(
+        room.state,
+        player,
+        message.from || message.action?.from,
+        message.to || message.action?.to
+      );
       if (!outcome.ok) {
         return send(socket, 'error', { message: outcome.reason });
       }
 
-      broadcast(room, 'state', {
-        state: room.state,
-        result: outcome.result,
-        capturedPiece: outcome.capturedPiece,
-        from: message.from,
-        to: message.to,
-        lastPlayer: player
-      });
+      const from = message.from || message.action?.from;
+      const to = message.to || message.action?.to;
+      broadcastState(room, outcome, from, to, player);
+      requestBotTurn(room);
       return;
     }
 
@@ -131,6 +537,17 @@ wss.on('connection', (socket) => {
       if (!room || !player) return;
 
       rooms.resetRoom(room.code, message.mode);
+      if (room.bot) {
+        room.state.players.p2 = 'p2';
+      }
+      if (room.botMatch) {
+        clearTimeout(room.botMatch.timer);
+        room.botMatch.timer = null;
+        room.botMatch.initialState = JSON.parse(JSON.stringify(room.state));
+        room.botMatch.replaySaved = false;
+        room.state.players = { p1: 'bot-p1', p2: 'bot-p2' };
+        requestBotMatchTurn(room);
+      }
       broadcast(room, 'rematch', {
         state: room.state,
         by: player,
@@ -173,4 +590,5 @@ const port = process.env.PORT || 3000;
 server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);
+  tournaments.resume();
 });

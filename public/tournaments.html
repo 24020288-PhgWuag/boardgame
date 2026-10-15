@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTT V2 // Giải đấu Bot</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <style>
+    .tournament-shell { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
+    .tournament-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.4fr); gap: 18px; align-items: start; }
+    .tournament-card { background: var(--card-bg); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--shadow-sm); }
+    .tournament-card h2 { margin-top: 0; }
+    .tournament-field { display: grid; gap: 6px; margin: 14px 0; }
+    .tournament-field input, .tournament-field select { width: 100%; min-height: 40px; }
+    .bot-checklist { display: grid; gap: 8px; max-height: 250px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); }
+    .bot-option { display: flex; gap: 9px; align-items: center; }
+    .bot-option input { width: auto; }
+    .tournament-list { display: grid; gap: 12px; }
+    .tournament-item { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); }
+    .tournament-item h3 { margin: 0 0 6px; }
+    .tournament-meta, .muted { color: var(--muted); font-size: .9rem; }
+    .standings { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    .standings th, .standings td { padding: 8px 6px; text-align: left; border-bottom: 1px solid var(--line); }
+    .match-list { display: grid; gap: 7px; margin-top: 12px; }
+    .match-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px; border-radius: var(--radius-sm); background: rgba(23,33,31,.045); }
+    .match-row a { white-space: nowrap; }
+    .tournament-status { text-transform: uppercase; font-size: .75rem; letter-spacing: .08em; color: var(--green); }
+    @media (max-width: 760px) { .tournament-grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Về sảnh chính">
+        <span class="brand-mark">O</span><div><strong>OTT V2</strong><small>ĐẤU TRƯỜNG BOT</small></div>
+      </a>
+      <a class="secondary-button" href="/">Về sảnh</a>
+    </header>
+    <section class="tournament-shell">
+      <p class="eyebrow">GIẢI ĐẤU TRÍ TUỆ NHÂN TẠO</p>
+      <h1>Giải đấu bot</h1>
+      <p class="muted">Chọn các bot để thi đấu vòng tròn hai lượt. Mỗi cặp đổi bên Đỏ và Xanh ở lượt thứ hai.</p>
+      <div class="tournament-grid">
+        <form id="create-form" class="tournament-card">
+          <h2>Tạo giải đấu</h2>
+          <div class="tournament-field">
+            <strong>Tải bot của bạn lên</strong>
+            <input id="bot-name" maxlength="60" placeholder="Tên bot (không bắt buộc)">
+            <input id="bot-file" type="file" accept=".py,text/x-python">
+            <button id="upload-bot" class="action-button alt" type="button">Tải bot Python lên</button>
+            <small id="upload-status" class="muted" aria-live="polite"></small>
+          </div>
+          <button id="test-tournament" class="secondary-button" type="button">Chạy giải thử với bot mẫu</button>
+          <small class="muted">Bot được chọn sẽ đấu với Random và Minimax, đổi bên sau mỗi ván (6 trận).</small>
+          <label class="tournament-field">Tên giải
+            <input id="tournament-name" maxlength="60" placeholder="Giải Bot Cuối Tuần">
+          </label>
+          <label class="tournament-field">Chế độ quân
+            <select id="tournament-mode">
+              <option value="classic">3v3 Nhanh</option><option value="tactical">6v6 Chiến thuật</option><option value="army" selected>9v9 Đại chiến</option>
+            </select>
+          </label>
+          <label class="tournament-field">Giới hạn lượt mỗi trận
+            <input id="max-turns" type="number" min="20" max="2000" value="300">
+          </label>
+          <div class="tournament-field"><strong>Chọn từ 2 đến 12 bot</strong><div id="bot-list" class="bot-checklist">Đang tải danh sách bot…</div></div>
+          <button class="primary-button" type="submit">Bắt đầu giải vòng tròn</button>
+          <p id="form-status" class="muted" aria-live="polite"></p>
+        </form>
+        <section class="tournament-card">
+          <h2>Các giải đấu</h2>
+          <div id="tournament-list" class="tournament-list">Đang tải giải đấu…</div>
+        </section>
+      </div>
+    </section>
+  </main>
+  <script>
+    const botList = document.getElementById('bot-list');
+    const tournamentList = document.getElementById('tournament-list');
+    const formStatus = document.getElementById('form-status');
+    const uploadStatus = document.getElementById('upload-status');
+    let selectedTournamentId = null;
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+    }
+
+    async function loadBots() {
+      const response = await fetch('/api/bots');
+      if (!response.ok) throw new Error('Không thể tải danh sách bot.');
+      const { bots } = await response.json();
+      botList.replaceChildren();
+      for (const bot of bots) {
+        const label = document.createElement('label');
+        label.className = 'bot-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = 'bot';
+        checkbox.value = bot.id;
+        checkbox.dataset.botName = bot.name;
+        const name = document.createElement('span');
+        name.textContent = `${bot.name}${bot.builtin ? ' · bot có sẵn' : ''}`;
+        label.append(checkbox, name);
+        botList.append(label);
+      }
+      if (!bots.length) botList.textContent = 'Hãy tải bot lên từ hộp thoại Bot đấu Bot ở sảnh trước.';
+    }
+
+    function renderTournament(tournament) {
+      const standings = tournament.standings || [];
+      const rows = standings.map((row, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(row.name)}</td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td><strong>${row.points}</strong></td></tr>`).join('');
+      const matches = tournament.matches || [];
+      const statusLabels = { queued: 'Đang chờ', running: 'Đang đấu', completed: 'Đã xong' };
+      const matchRows = matches.map(match => {
+        const result = match.result;
+        const winner = result?.winnerBotName ? ` · ${escapeHtml(result.winnerBotName)} thắng` : result?.draw ? ' · Hòa' : '';
+        const replay = result?.replayFile ? `<a href="/replay.html?file=${encodeURIComponent(result.replayFile)}&autoplay=1">▶ Phát lại</a>` : '';
+        return `<div class="match-row"><span>${escapeHtml(match.p1BotName)} vs ${escapeHtml(match.p2BotName)} <small class="muted">${statusLabels[match.status] || escapeHtml(match.status)}${winner}</small></span>${replay}</div>`;
+      }).join('');
+      const progress = `${tournament.completedMatches ?? matches.filter(match => match.status === 'completed').length}/${tournament.matchCount ?? matches.length} trận`;
+      const tournamentStatus = { queued: 'Sẵn sàng', running: 'Đang diễn ra', completed: 'Hoàn tất', failed: 'Gặp lỗi' }[tournament.status] || tournament.status;
+      const modeLabels = { classic: '3v3 Nhanh', tactical: '6v6 Chiến thuật', army: '9v9 Đại chiến' };
+      return `<article class="tournament-item" data-tournament-id="${escapeHtml(tournament.id)}">
+        <div class="tournament-status">${escapeHtml(tournamentStatus)} · ${progress}</div>
+        <h3>${escapeHtml(tournament.name)}</h3>
+        <div class="tournament-meta">${modeLabels[tournament.mode] || escapeHtml(tournament.mode)} · Vòng tròn hai lượt · ${new Date(tournament.createdAt).toLocaleString('vi-VN')}</div>
+        ${tournament.error ? `<p class="muted">${escapeHtml(tournament.error)}</p>` : ''}
+        <table class="standings"><thead><tr><th>Hạng</th><th>Bot</th><th>Trận</th><th>Thắng</th><th>Hòa</th><th>Thua</th><th>Điểm</th></tr></thead><tbody>${rows}</tbody></table>
+        <details ${tournament.id === selectedTournamentId ? 'open' : ''}><summary>Lịch đấu và replay</summary><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div></details>
+      </article>`;
+    }
+
+    async function loadTournaments() {
+      const response = await fetch('/api/tournaments');
+      if (!response.ok) throw new Error('Không thể tải danh sách giải đấu.');
+      const { tournaments } = await response.json();
+      if (!tournaments.length) {
+        tournamentList.textContent = 'Chưa có giải đấu. Chọn bot và bắt đầu giải mới.';
+        return;
+      }
+      const selected = selectedTournamentId && tournaments.find(item => item.id === selectedTournamentId);
+      const ids = selected ? [selected, ...tournaments.filter(item => item.id !== selectedTournamentId)] : tournaments;
+      tournamentList.innerHTML = ids.map(renderTournament).join('');
+    }
+
+    async function createTournament(botIds, name) {
+      formStatus.textContent = 'Đang tạo giải đấu…';
+      try {
+        const response = await fetch('/api/tournaments', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name || document.getElementById('tournament-name').value,
+            mode: document.getElementById('tournament-mode').value,
+            maxTurns: Number(document.getElementById('max-turns').value),
+            botIds
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tạo giải đấu.');
+        selectedTournamentId = data.tournament.id;
+        formStatus.textContent = 'Giải đã bắt đầu. Các trận lần lượt được tự động thi đấu.';
+        await loadTournaments();
+      } catch (error) {
+        formStatus.textContent = error.message;
+      }
+    }
+
+    document.getElementById('create-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const botIds = [...botList.querySelectorAll('input[name="bot"]:checked')].map(input => input.value);
+      if (botIds.length < 2 || botIds.length > 12) {
+        formStatus.textContent = 'Hãy chọn từ 2 đến 12 bot.';
+        return;
+      }
+      createTournament(botIds);
+    });
+
+    document.getElementById('upload-bot').addEventListener('click', async () => {
+      const input = document.getElementById('bot-file');
+      const file = input.files[0];
+      if (!file) {
+        uploadStatus.textContent = 'Hãy chọn tệp Python .py trước.';
+        return;
+      }
+      if (!file.name.toLowerCase().endsWith('.py')) {
+        uploadStatus.textContent = 'Chỉ chấp nhận tệp Python .py.';
+        return;
+      }
+      if (file.size > 256 * 1024) {
+        uploadStatus.textContent = 'Tệp bot tối đa 256 KB.';
+        return;
+      }
+      uploadStatus.textContent = 'Đang tải bot lên…';
+      try {
+        const response = await fetch('/api/bots', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, name: document.getElementById('bot-name').value, source: await file.text() })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Tải bot lên thất bại.');
+        await loadBots();
+        const uploaded = [...botList.querySelectorAll('input[name="bot"]')].find(option => option.value === data.bot.id);
+        if (uploaded) uploaded.checked = true;
+        document.getElementById('bot-name').value = '';
+        input.value = '';
+        uploadStatus.textContent = `Đã tải ${data.bot.name}. Bot đã được chọn cho giải đấu.`;
+      } catch (error) {
+        uploadStatus.textContent = error.message;
+      }
+    });
+
+    document.getElementById('test-tournament').addEventListener('click', () => {
+      const selected = [...botList.querySelectorAll('input[name="bot"]:checked')];
+      const customBots = selected.filter(option => !['random', 'minimax'].includes(option.value));
+      if (customBots.length !== 1) {
+        formStatus.textContent = 'Hãy tải lên hoặc chọn đúng một bot của bạn trong danh sách.';
+        return;
+      }
+      const bot = customBots[0];
+      createTournament([bot.value, 'random', 'minimax'], `Giải thử: ${bot.dataset.botName}`);
+    });
+
+    loadBots().catch(error => { botList.textContent = error.message; });
+    loadTournaments().catch(error => { tournamentList.textContent = error.message; });
+    setInterval(() => loadTournaments().catch(() => {}), 2500);
+  </script>
+</body>
+</html>

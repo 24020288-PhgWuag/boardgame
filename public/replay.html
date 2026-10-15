@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTT V2 // Replay</title>
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/board.css">
+  <style>
+    .replay-shell { max-width: 780px; margin: 0 auto; padding: 20px 14px; }
+    .replay-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin: 14px 0; }
+    .replay-select-group, .replay-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .replay-select-group { flex: 1 1 auto; min-width: 0; }
+    .replay-actions { flex: 0 0 auto; align-items: flex-end; }
+    .replay-toolbar select, .replay-toolbar button, .replay-toolbar a { padding: 7px 9px; border-radius: 8px; min-width: 0; }
+    .replay-toolbar button, .replay-toolbar a { width: auto; text-align: center; white-space: nowrap; }
+    .replay-toolbar .icon-control { width: 38px; padding-left: 0; padding-right: 0; }
+    .replay-toolbar label { display: flex; align-items: flex-end; gap: 6px; white-space: nowrap; line-height: 38px; }
+    .replay-toolbar #replay-file { flex: 1 1 auto; width: auto; min-width: 0; }
+    .replay-status { color: var(--muted); margin: 10px 0 16px; }
+    .replay-board { max-width: 660px; margin: 0 auto; }
+    .replay-history { max-width: 660px; margin: 18px auto; }
+    .replay-history ol { max-height: 220px; overflow: auto; padding-left: 28px; }
+    .replay-history li.current { font-weight: 700; color: var(--accent, #e76f51); }
+    @media (max-width: 760px) {
+      .replay-toolbar { justify-content: flex-start; }
+      .replay-select-group { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; }
+      .replay-actions { width: 100%; justify-content: flex-start; }
+      .replay-toolbar #replay-file { flex: 1; width: auto; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Về sảnh chính" title="Về sảnh chính">
+        <span class="brand-mark">O</span>
+        <div>
+          <strong>OTT V2</strong>
+          <small>TACTICAL ARENA // 9x9</small>
+        </div>
+      </a>
+    </header>
+    <section class="replay-shell">
+      <p class="eyebrow">OTT V2 // MATCH REPLAY</p>
+      <h1>Phát lại trận đấu</h1>
+      <div class="replay-toolbar">
+        <div class="replay-select-group">
+          <select id="replay-file" aria-label="Chọn replay"></select>
+          <button id="load-replay" class="secondary-button" type="button">Mở replay</button>
+          <button id="download-replay" class="secondary-button" type="button">Tải xuống</button>
+        </div>
+        <div class="replay-actions">
+          <button id="previous-move" class="action-button alt icon-control" type="button" aria-label="Nước trước" title="Nước trước">⏮</button>
+          <button id="play-replay" class="primary-button icon-control" type="button" aria-label="Phát replay" title="Phát replay">▶</button>
+          <button id="next-move" class="action-button alt icon-control" type="button" aria-label="Nước sau" title="Nước sau">⏭</button>
+          <label>Tốc độ
+            <select id="replay-speed">
+              <option value="1200">Chậm</option>
+              <option value="650" selected>Vừa</option>
+              <option value="250">Nhanh</option>
+            </select>
+          </label>
+          <a class="secondary-button" href="/">Về sảnh</a>
+        </div>
+      </div>
+      <div id="replay-status" class="replay-status">Đang tải danh sách replay...</div>
+      <div id="board" class="board replay-board" aria-label="Bàn cờ replay"></div>
+      <section class="replay-history">
+        <h2>Lịch sử nước đi</h2>
+        <ol id="replay-moves"></ol>
+      </section>
+    </section>
+  </main>
+  <script src="/js/config.js"></script>
+  <script src="/js/gameRules.js"></script>
+  <script src="/js/graphics/renderer.js"></script>
+  <script src="/js/graphics/soundManager.js"></script>
+  <script>
+    const renderer = new BoardRenderer(document.getElementById('board'));
+    const sound = new window.SoundManager();
+    const fileSelect = document.getElementById('replay-file');
+    const status = document.getElementById('replay-status');
+    const moveList = document.getElementById('replay-moves');
+    const playButton = document.getElementById('play-replay');
+    let replay = null;
+    let currentState = null;
+    let moveIndex = 0;
+    let playTimer = null;
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function renderReplay() {
+      renderer.render(currentState, moveIndex > 0 ? replay.moves[moveIndex - 1].to : null);
+      const total = replay.moves.length;
+      const players = replay.players ? ` · ${replay.players.p1} vs ${replay.players.p2}` : '';
+      status.textContent = `${replay.mode}${players} · Nước ${moveIndex}/${total}` +
+        (currentState.winner ? ` · ${currentState.winReason}` : '');
+      moveList.innerHTML = replay.moves.map((move, index) => {
+        const from = window.GameRules.coordToNotation(move.from.row, move.from.col);
+        const to = window.GameRules.coordToNotation(move.to.row, move.to.col);
+        return `<li class="${index < moveIndex ? 'played' : ''} ${index === moveIndex - 1 ? 'current' : ''}">` +
+          `${move.player.toUpperCase()} ${from} → ${to} (${move.result})</li>`;
+      }).join('');
+      document.getElementById('previous-move').disabled = moveIndex === 0;
+      document.getElementById('next-move').disabled = moveIndex === total;
+    }
+
+    function stopReplay() {
+      if (playTimer) clearTimeout(playTimer);
+      playTimer = null;
+      playButton.textContent = '▶';
+      playButton.setAttribute('aria-label', 'Phát replay');
+      playButton.title = 'Phát replay';
+    }
+
+    function advance() {
+      if (!replay || moveIndex >= replay.moves.length) return stopReplay();
+      const move = replay.moves[moveIndex];
+      const outcome = window.replayApply(currentState, move);
+      if (!outcome.ok) {
+        stopReplay();
+        status.textContent = `Replay không hợp lệ: ${outcome.reason}`;
+        return;
+      }
+      moveIndex++;
+      renderReplay();
+      if (move.result === 'capture') sound.playCapture();
+      else if (move.result === 'defeat') sound.playBlocked();
+      else sound.playMove();
+      if (currentState.winner) {
+        if (currentState.winner === move.player) sound.playVictory();
+        else sound.playDefeat();
+      }
+      if (playTimer) {
+        playTimer = setTimeout(advance, Number(document.getElementById('replay-speed').value));
+      }
+    }
+
+    async function loadReplay(file) {
+      stopReplay();
+      const response = await fetch(`/api/replays/${encodeURIComponent(file)}`);
+      if (!response.ok) throw new Error('Không thể tải replay.');
+      replay = await response.json();
+      currentState = clone(replay.initial_state);
+      moveIndex = 0;
+      renderReplay();
+    }
+
+    window.replayApply = function(state, move) {
+      const piece = state.board[move.from.row]?.[move.from.col];
+      if (!piece || piece.player !== move.player) return { ok: false, reason: 'Quân nguồn không hợp lệ.' };
+      const target = state.board[move.to.row]?.[move.to.col];
+      if (target && window.GameRules.beats[piece.type] !== target.type) {
+        state.board[move.from.row][move.from.col] = null;
+      } else {
+        state.board[move.to.row][move.to.col] = piece;
+        state.board[move.from.row][move.from.col] = null;
+      }
+      state.turn = move.player === 'p1' ? 'p2' : 'p1';
+      if (moveIndex + 1 === replay.moves.length && replay.result.winner) {
+        state.winner = replay.result.winner;
+        state.winReason = replay.result.reason;
+      }
+      return { ok: true };
+    };
+
+    document.getElementById('previous-move').onclick = () => {
+      if (!replay || moveIndex === 0) return;
+      currentState = clone(replay.initial_state);
+      moveIndex--;
+      for (let index = 0; index < moveIndex; index++) window.replayApply(currentState, replay.moves[index]);
+      renderReplay();
+    };
+    document.getElementById('next-move').onclick = () => {
+      if (!replay || moveIndex >= replay.moves.length) return;
+      advance();
+    };
+    function startPlayback(withSound = true) {
+      if (!replay) return;
+      if (playTimer) return stopReplay();
+      if (moveIndex >= replay.moves.length) {
+        currentState = clone(replay.initial_state);
+        moveIndex = 0;
+        renderReplay();
+      }
+      if (withSound) sound.ensureContext();
+      playButton.textContent = '⏸';
+      playButton.setAttribute('aria-label', 'Tạm dừng replay');
+      playButton.title = 'Tạm dừng replay';
+      playTimer = setTimeout(advance, Number(document.getElementById('replay-speed').value));
+    }
+
+    playButton.onclick = () => startPlayback(true);
+    document.getElementById('load-replay').onclick = () => loadReplay(fileSelect.value).catch(error => {
+      status.textContent = error.message;
+    });
+    document.getElementById('download-replay').onclick = async () => {
+      const file = fileSelect.value;
+      if (!file) {
+        status.textContent = 'Chưa có replay để tải xuống.';
+        return;
+      }
+      try {
+        const response = await fetch(`/api/replays/${encodeURIComponent(file)}`);
+        if (!response.ok) throw new Error('Không thể tải file replay.');
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        status.textContent = `Đã tải xuống ${file}.`;
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+
+    fetch('/api/replays').then(response => response.json()).then(data => {
+      fileSelect.innerHTML = data.replays.map(item => `<option value="${item.file}">${item.file}</option>`).join('');
+      if (!data.replays.length) {
+        status.textContent = 'Chưa có replay. Hãy chạy npm run bot:match trước.';
+        return;
+      }
+      const params = new URLSearchParams(location.search);
+      const requested = params.get('file');
+      if (requested) {
+        if (!data.replays.some(item => item.file === requested)) {
+          fileSelect.add(new Option(requested, requested));
+        }
+        fileSelect.value = requested;
+        return loadReplay(requested).then(() => {
+          if (params.get('autoplay') === '1') startPlayback(false);
+        });
+      }
+      return loadReplay(fileSelect.value);
+    }).catch(error => { status.textContent = error.message; });
+  </script>
+</body>
+</html>

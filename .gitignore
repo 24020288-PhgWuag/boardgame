@@ -1,4 +1,28 @@
 node_modules/
+
+# Generated bot-match replays
+matches/*.json
+
+# User-uploaded bots
+bots/uploads/*
+bots/submissions/*
+bots/__pycache__/
+
+# Generated tournaments, frozen bot snapshots, and tournament replays
+matches/tournaments/
+
+# Local configuration and secrets
 .env
+.env.*
+!.env.example
+
+# Logs and runtime output
 npm-debug.log*
+npm-debug.log
+yarn-debug.log*
+yarn-error.log*
+
+# Operating-system and editor files
 .DS_Store
+Thumbs.db
+.vscode/

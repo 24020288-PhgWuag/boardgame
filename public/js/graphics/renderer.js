@@ -4,7 +4,7 @@ class BoardRenderer {
     this.cells = []; // 9x9 matrix of DOM elements
   }
 
-  render(state) {
+  render(state, animationPosition = null) {
     this.element.innerHTML = '';
     this.cells = Array.from({ length: 9 }, () => Array(9).fill(null));
 
@@ -43,6 +43,11 @@ class BoardRenderer {
         if (piece) {
           const pieceWrap = document.createElement('div');
           pieceWrap.className = `piece piece-${piece.player} piece-${piece.type}`;
+          if (animationPosition &&
+              animationPosition.row === rowIndex &&
+              animationPosition.col === colIndex) {
+            pieceWrap.classList.add('piece-move-in');
+          }
           pieceWrap.draggable = true;
           pieceWrap.dataset.row = rowIndex;
           pieceWrap.dataset.col = colIndex;

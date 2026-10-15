@@ -6,7 +6,7 @@ class RoomManager {
     this.rooms = new Map();
   }
 
-  createRoom(mode = 'classic') {
+  createRoom(mode = 'army') {
     let code;
     do {
       code = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -18,7 +18,9 @@ class RoomManager {
       createdAt: Date.now(),
       state: createInitialState(mode),
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
-      spectators: new Set()
+      spectators: new Set(),
+      bot: null,
+      botMatch: null
     };
     this.rooms.set(code, room);
     return room;
@@ -31,6 +33,12 @@ class RoomManager {
   joinRoom(code, socket, requestedRole = null) {
     const room = this.getRoom(code);
     if (!room) return { error: 'Không tìm thấy phòng đấu với mã này.' };
+
+    // Rejoining the same socket should keep its current seat instead of creating duplicates.
+    const existingRole = room.sockets.get(socket);
+    if (existingRole) {
+      return { room, player: existingRole };
+    }
 
     // Check existing players in room
     let p1Taken = false;
@@ -64,7 +72,7 @@ class RoomManager {
   resetRoom(code, mode = null) {
     const room = this.getRoom(code);
     if (!room) return null;
-    const currentMode = mode || room.mode || 'classic';
+    const currentMode = mode || room.mode || 'army';
     room.mode = currentMode;
     const newState = createInitialState(currentMode);
     
@@ -82,7 +90,7 @@ class RoomManager {
     const list = [];
     for (const [code, room] of this.rooms.entries()) {
       let p1 = false;
-      let p2 = false;
+      let p2 = Boolean(room.bot || room.botMatch);
       let spectators = 0;
       for (const [, role] of room.sockets.entries()) {
         if (role === 'p1') p1 = true;
@@ -91,7 +99,7 @@ class RoomManager {
       }
       list.push({
         code,
-        mode: room.mode || 'classic',
+        mode: room.mode || 'army',
         players: (p1 ? 1 : 0) + (p2 ? 1 : 0),
         spectators,
         started: Boolean(room.state.history.length),
@@ -114,6 +122,9 @@ class RoomManager {
 
         // If room is completely empty, clean up
         if (room.sockets.size === 0) {
+          room.bot?.stop();
+          room.botMatch?.p1?.stop();
+          room.botMatch?.p2?.stop();
           this.rooms.delete(code);
           return { code, empty: true };
         }
