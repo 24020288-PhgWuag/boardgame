@@ -1,8 +1,8 @@
 /**
- * Random AI Bot for OanTuTi Arena
- * Adheres strictly to docs/specs/04-BOT-RUNNER-IPC-SPEC.md STDIO NDJSON.
+ * Tactical bot with controlled variety.
+ * It is no longer random: it scores captures, safety, mobility and throne pressure,
+ * then chooses randomly among near-best moves so repeated matches are less predictable.
  */
-
 const WebSocket = require('ws');
 
 interface PieceData {
@@ -16,120 +16,115 @@ interface PieceData {
 
 interface InitMessage {
   type: 'INIT';
-  match_id: string;
   my_side: 'WHITE' | 'BLACK';
-  map: {
-    name: string;
-    width: number;
-    height: number;
-    valid_tiles: [number, number][];
-    white_throne: [number, number];
-    black_throne: [number, number];
-  };
-  pieces: PieceData[];
-  turn_time_limit_ms: number;
-  max_turns: number;
+  map: { valid_tiles: [number, number][]; white_throne: [number, number]; black_throne: [number, number] };
 }
 
 interface TurnMessage {
   type: 'TURN';
-  turn_number: number;
-  time_remaining_ms: number;
   pieces: PieceData[];
   history?: unknown[];
 }
 
-const KING_DIRECTIONS: readonly [number, number][] = [
-  [-1, -1], [0, -1], [1, -1],
-  [-1,  0],          [1,  0],
-  [-1,  1], [0,  1], [1,  1],
+type Move = { piece: PieceData; target: [number, number]; score: number };
+
+const DIRECTIONS: readonly [number, number][] = [
+  [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]
 ];
-
-const RPS_BEATS: Record<string, 'ROCK' | 'SCISSORS' | 'PAPER'> = {
-  ROCK: 'SCISSORS',
-  SCISSORS: 'PAPER',
-  PAPER: 'ROCK',
-};
-
+const BEATS: Record<string, string> = { ROCK: 'SCISSORS', SCISSORS: 'PAPER', PAPER: 'ROCK' };
 let mySide: 'WHITE' | 'BLACK' = 'WHITE';
+let enemyThrone: [number, number] = [0, 0];
 const validTiles = new Set<string>();
 
-const ws = new WebSocket(process.env.BOT_URL || 'ws://localhost:3000');
-ws.on('open', () => {
+function distance(a: [number, number], b: [number, number]) {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+}
+
+function key(x: number, y: number) {
+  return `${x},${y}`;
+}
+
+function legalMoves(pieces: PieceData[]): Move[] {
+  const grid = new Map<string, PieceData>();
+  for (const piece of pieces) if (piece.is_alive) grid.set(key(piece.x, piece.y), piece);
+  const mine = pieces.filter((piece) => piece.is_alive && piece.owner === mySide);
+  const moves: Move[] = [];
+
+  for (const piece of mine) {
+    for (const [dx, dy] of DIRECTIONS) {
+      const x = piece.x + dx;
+      const y = piece.y + dy;
+      if (!validTiles.has(key(x, y))) continue;
+      const target = grid.get(key(x, y));
+      if (target && target.owner === mySide) continue;
+
+      let score = 0;
+      const nextDistance = distance([x, y], enemyThrone);
+      const currentDistance = distance([piece.x, piece.y], enemyThrone);
+      score += (currentDistance - nextDistance) * 18;
+
+      if (x === enemyThrone[0] && y === enemyThrone[1]) score += 10000;
+      if (target) {
+        if (target.type === piece.type) continue;
+        if (BEATS[piece.type] === target.type) score += 650;
+        else score -= 500;
+        score += target.type === 'ROCK' || target.type === 'PAPER' || target.type === 'SCISSORS' ? 20 : 0;
+      }
+
+      // Prefer positions that cannot be immediately captured by a nearby enemy.
+      for (const enemy of pieces) {
+        if (!enemy.is_alive || enemy.owner === mySide) continue;
+        if (distance([enemy.x, enemy.y], [x, y]) !== 1) continue;
+        if (BEATS[enemy.type] === piece.type) score -= 180;
+        if (BEATS[piece.type] === enemy.type) score += 35;
+      }
+
+      // Keep options open instead of moving a piece into a dead corner.
+      let mobility = 0;
+      for (const [mx, my] of DIRECTIONS) {
+        if (validTiles.has(key(x + mx, y + my)) && !grid.has(key(x + mx, y + my))) mobility++;
+      }
+      score += mobility * 8;
+      moves.push({ piece, target: [x, y], score });
+    }
+  }
+  return moves;
+}
+
+function sendMove(move: Move) {
   ws.send(JSON.stringify({
-    type: 'bot_join',
-    code: process.env.BOT_ROOM || '',
-    name: process.env.BOT_NAME || 'random-bot'
+    type: 'bot_move',
+    from: { row: move.piece.y, col: move.piece.x },
+    to: { row: move.target[1], col: move.target[0] }
   }));
-});
+}
+
+const ws = new WebSocket(process.env.BOT_URL || 'ws://localhost:3000');
+ws.on('open', () => ws.send(JSON.stringify({
+  type: 'bot_join',
+  code: process.env.BOT_ROOM || '',
+  name: process.env.BOT_NAME || 'tactical-bot'
+})));
 ws.on('message', (raw: Buffer) => {
-  const line = raw.toString().trim();
-  if (!line) return;
-  let msg: InitMessage | TurnMessage;
+  let message: InitMessage | TurnMessage;
   try {
-    msg = JSON.parse(line) as InitMessage | TurnMessage;
+    message = JSON.parse(raw.toString()) as InitMessage | TurnMessage;
   } catch {
     return;
   }
-
-  if (msg.type === 'INIT') {
-    mySide = msg.my_side;
+  if (message.type === 'INIT') {
+    mySide = message.my_side;
+    enemyThrone = mySide === 'WHITE' ? message.map.black_throne : message.map.white_throne;
     validTiles.clear();
-    for (const [x, y] of msg.map.valid_tiles) {
-      validTiles.add(`${x},${y}`);
-    }
+    for (const tile of message.map.valid_tiles) validTiles.add(key(tile[0], tile[1]));
     ws.send(JSON.stringify({ type: 'bot_ready' }));
-  } else if (msg.type === 'TURN') {
-    const pieces = msg.pieces;
-    const myLivingPieces = pieces.filter((p) => p.owner === mySide && p.is_alive);
-    const grid = new Map<string, PieceData>();
-
-    for (const p of pieces) {
-      if (p.is_alive) {
-        grid.set(`${p.x},${p.y}`, p);
-      }
-    }
-
-    interface CandidateMove {
-      pieceId: number;
-      target: [number, number];
-    }
-
-    const legalMoves: CandidateMove[] = [];
-
-    for (const p of myLivingPieces) {
-      for (const [dx, dy] of KING_DIRECTIONS) {
-        const tx = p.x + dx;
-        const ty = p.y + dy;
-        const targetKey = `${tx},${ty}`;
-
-        if (!validTiles.has(targetKey)) continue;
-
-        const occupant = grid.get(targetKey);
-        if (!occupant) {
-          // Empty tile: legal move
-          legalMoves.push({ pieceId: p.id, target: [tx, ty] });
-        } else if (occupant.owner !== mySide) {
-          // Enemy piece: must dominate (attacker beats defender)
-          if (RPS_BEATS[p.type] === occupant.type) {
-            legalMoves.push({ pieceId: p.id, target: [tx, ty] });
-          }
-        }
-      }
-    }
-
-    if (legalMoves.length === 0) {
-      ws.send(JSON.stringify({ type: 'bot_move', from: null, to: null }));
-    } else {
-      const selectedIndex = Math.floor(Math.random() * legalMoves.length);
-      const chosen = legalMoves[selectedIndex];
-      const piece = pieces.find((item) => item.id === chosen.pieceId);
-      if (!piece) return;
-      ws.send(JSON.stringify({
-        type: 'bot_move',
-        from: { row: piece.y, col: piece.x },
-        to: { row: chosen.target[1], col: chosen.target[0] }
-      }));
-    }
+    return;
   }
+  if (message.type !== 'TURN') return;
+  const moves = legalMoves(message.pieces);
+  if (!moves.length) return ws.send(JSON.stringify({ type: 'bot_move', from: null, to: null }));
+  moves.sort((a, b) => b.score - a.score);
+  const bestScore = moves[0].score;
+  const shortlist = moves.filter((move) => move.score >= bestScore - 35).slice(0, 5);
+  sendMove(shortlist[Math.floor(Math.random() * shortlist.length)]);
 });

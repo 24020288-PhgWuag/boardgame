@@ -1,12 +1,7 @@
 /**
- * Greedy Capture Bot for OanTuTi Arena
- * Heuristic priority:
- * 1. Immediate Throne Breach
- * 2. Dominant Capture (Omega = +1)
- * 3. Throne Proximity Advance (minimizing Chebyshev distance to enemy throne)
- * 4. Any legal move fallback
+ * Strong positional bot for OTT V2.
+ * Uses tactical captures first, then a one-ply safety check and throne pressure.
  */
-
 const WebSocket = require('ws');
 
 interface PieceData {
@@ -17,171 +12,92 @@ interface PieceData {
   y: number;
   is_alive: boolean;
 }
-
 interface InitMessage {
   type: 'INIT';
-  match_id: string;
   my_side: 'WHITE' | 'BLACK';
-  map: {
-    name: string;
-    width: number;
-    height: number;
-    valid_tiles: [number, number][];
-    white_throne: [number, number];
-    black_throne: [number, number];
-  };
-  pieces: PieceData[];
-  turn_time_limit_ms: number;
-  max_turns: number;
+  map: { valid_tiles: [number, number][]; white_throne: [number, number]; black_throne: [number, number] };
 }
+interface TurnMessage { type: 'TURN'; pieces: PieceData[]; history?: unknown[]; }
+type Move = { piece: PieceData; target: [number, number]; score: number; capture: boolean };
 
-interface TurnMessage {
-  type: 'TURN';
-  turn_number: number;
-  time_remaining_ms: number;
-  pieces: PieceData[];
-  history?: unknown[];
-}
-
-const KING_DIRECTIONS: readonly [number, number][] = [
-  [-1, -1], [0, -1], [1, -1],
-  [-1,  0],          [1,  0],
-  [-1,  1], [0,  1], [1,  1],
+const DIRECTIONS: readonly [number, number][] = [
+  [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]
 ];
-
-const RPS_BEATS: Record<string, 'ROCK' | 'SCISSORS' | 'PAPER'> = {
-  ROCK: 'SCISSORS',
-  SCISSORS: 'PAPER',
-  PAPER: 'ROCK',
-};
-
+const BEATS: Record<string, string> = { ROCK: 'SCISSORS', SCISSORS: 'PAPER', PAPER: 'ROCK' };
+const values: Record<string, number> = { ROCK: 10, PAPER: 10, SCISSORS: 10 };
 let mySide: 'WHITE' | 'BLACK' = 'WHITE';
 let enemyThrone: [number, number] = [0, 0];
 const validTiles = new Set<string>();
 
+function key(x: number, y: number) { return `${x},${y}`; }
+function distance(a: [number, number], b: [number, number]) {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]));
+}
+function isCapturable(piece: PieceData, at: [number, number], enemies: PieceData[]) {
+  return enemies.some((enemy) =>
+    distance([enemy.x, enemy.y], at) === 1 && BEATS[enemy.type] === piece.type
+  );
+}
+
+function findMoves(pieces: PieceData[]): Move[] {
+  const grid = new Map<string, PieceData>();
+  for (const piece of pieces) if (piece.is_alive) grid.set(key(piece.x, piece.y), piece);
+  const enemies = pieces.filter((piece) => piece.is_alive && piece.owner !== mySide);
+  const moves: Move[] = [];
+
+  for (const piece of pieces.filter((item) => item.is_alive && item.owner === mySide)) {
+    for (const [dx, dy] of DIRECTIONS) {
+      const target: [number, number] = [piece.x + dx, piece.y + dy];
+      if (!validTiles.has(key(target[0], target[1]))) continue;
+      const occupant = grid.get(key(target[0], target[1]));
+      if (occupant?.owner === mySide || occupant?.type === piece.type) continue;
+
+      const capture = Boolean(occupant);
+      let score = 0;
+      const progress = distance([piece.x, piece.y], enemyThrone) - distance(target, enemyThrone);
+      score += progress * 45;
+      score += capture && occupant ? values[occupant.type] * 100 : 0;
+      if (target[0] === enemyThrone[0] && target[1] === enemyThrone[1]) score += 100000;
+      if (capture && occupant && BEATS[piece.type] !== occupant.type) score -= 1800;
+      if (isCapturable(piece, target, enemies)) score -= 900;
+
+      // Defend pieces that are already close to the enemy base.
+      const nearbyAllies = pieces.filter((ally) =>
+        ally.is_alive && ally.owner === mySide && ally.id !== piece.id &&
+        distance([ally.x, ally.y], target) <= 2
+      ).length;
+      score += nearbyAllies * 12;
+      moves.push({ piece, target, score, capture });
+    }
+  }
+  return moves;
+}
+
 const ws = new WebSocket(process.env.BOT_URL || 'ws://localhost:3000');
-ws.on('open', () => {
-  ws.send(JSON.stringify({
-    type: 'bot_join',
-    code: process.env.BOT_ROOM || '',
-    name: process.env.BOT_NAME || 'greedy-bot'
-  }));
-});
+ws.on('open', () => ws.send(JSON.stringify({
+  type: 'bot_join',
+  code: process.env.BOT_ROOM || '',
+  name: process.env.BOT_NAME || 'greedy-bot'
+})));
 ws.on('message', (raw: Buffer) => {
-  const line = raw.toString().trim();
-  if (!line) return;
-  let msg: InitMessage | TurnMessage;
-  try {
-    msg = JSON.parse(line) as InitMessage | TurnMessage;
-  } catch {
+  let message: InitMessage | TurnMessage;
+  try { message = JSON.parse(raw.toString()) as InitMessage | TurnMessage; } catch { return; }
+  if (message.type === 'INIT') {
+    mySide = message.my_side;
+    enemyThrone = mySide === 'WHITE' ? message.map.black_throne : message.map.white_throne;
+    validTiles.clear();
+    for (const tile of message.map.valid_tiles) validTiles.add(key(tile[0], tile[1]));
+    ws.send(JSON.stringify({ type: 'bot_ready' }));
     return;
   }
-
-  if (msg.type === 'INIT') {
-    mySide = msg.my_side;
-    enemyThrone = mySide === 'WHITE' ? msg.map.black_throne : msg.map.white_throne;
-    validTiles.clear();
-    for (const [x, y] of msg.map.valid_tiles) {
-      validTiles.add(`${x},${y}`);
-    }
-    ws.send(JSON.stringify({ type: 'bot_ready' }));
-  } else if (msg.type === 'TURN') {
-    const pieces = msg.pieces;
-    const myLivingPieces = pieces.filter((p) => p.owner === mySide && p.is_alive);
-    const grid = new Map<string, PieceData>();
-
-    for (const p of pieces) {
-      if (p.is_alive) {
-        grid.set(`${p.x},${p.y}`, p);
-      }
-    }
-
-    interface EvaluatedMove {
-      pieceId: number;
-      target: [number, number];
-      isThroneBreach: boolean;
-      isCapture: boolean;
-      distanceToEnemyThrone: number;
-      distanceDelta: number; // positive means moved closer
-    }
-
-    const candidateMoves: EvaluatedMove[] = [];
-
-    for (const p of myLivingPieces) {
-      const curDistToThrone = Math.max(
-        Math.abs(p.x - enemyThrone[0]),
-        Math.abs(p.y - enemyThrone[1])
-      );
-
-      for (const [dx, dy] of KING_DIRECTIONS) {
-        const tx = p.x + dx;
-        const ty = p.y + dy;
-        const targetKey = `${tx},${ty}`;
-
-        if (!validTiles.has(targetKey)) continue;
-
-        const occupant = grid.get(targetKey);
-        const isThroneBreach = tx === enemyThrone[0] && ty === enemyThrone[1];
-        const newDistToThrone = Math.max(
-          Math.abs(tx - enemyThrone[0]),
-          Math.abs(ty - enemyThrone[1])
-        );
-        const distanceDelta = curDistToThrone - newDistToThrone;
-
-        if (!occupant) {
-          candidateMoves.push({
-            pieceId: p.id,
-            target: [tx, ty],
-            isThroneBreach,
-            isCapture: false,
-            distanceToEnemyThrone: newDistToThrone,
-            distanceDelta,
-          });
-        } else if (occupant.owner !== mySide) {
-          if (RPS_BEATS[p.type] === occupant.type) {
-            candidateMoves.push({
-              pieceId: p.id,
-              target: [tx, ty],
-              isThroneBreach,
-              isCapture: true,
-              distanceToEnemyThrone: newDistToThrone,
-              distanceDelta,
-            });
-          }
-        }
-      }
-    }
-
-    if (candidateMoves.length === 0) {
-      ws.send(JSON.stringify({ type: 'bot_move', from: null, to: null }));
-      return;
-    }
-
-    // Sort moves by heuristic tiers:
-    // 1. Instant Throne Breach
-    // 2. Capture move
-    // 3. Distance Delta (higher positive delta = moved closer to enemy throne)
-    // 4. Absolute Distance to Enemy Throne (lower = closer)
-    candidateMoves.sort((a, b) => {
-      if (a.isThroneBreach !== b.isThroneBreach) {
-        return a.isThroneBreach ? -1 : 1;
-      }
-      if (a.isCapture !== b.isCapture) {
-        return a.isCapture ? -1 : 1;
-      }
-      if (a.distanceDelta !== b.distanceDelta) {
-        return b.distanceDelta - a.distanceDelta;
-      }
-      return a.distanceToEnemyThrone - b.distanceToEnemyThrone;
-    });
-
-    const chosen = candidateMoves[0];
-    const piece = pieces.find((item) => item.id === chosen.pieceId);
-    if (!piece) return;
-    ws.send(JSON.stringify({
-      type: 'bot_move',
-      from: { row: piece.y, col: piece.x },
-      to: { row: chosen.target[1], col: chosen.target[0] }
-    }));
-  }
+  if (message.type !== 'TURN') return;
+  const moves = findMoves(message.pieces);
+  if (!moves.length) return ws.send(JSON.stringify({ type: 'bot_move', from: null, to: null }));
+  moves.sort((a, b) => b.score - a.score);
+  const best = moves[0];
+  ws.send(JSON.stringify({
+    type: 'bot_move',
+    from: { row: best.piece.y, col: best.piece.x },
+    to: { row: best.target[1], col: best.target[0] }
+  }));
 });
