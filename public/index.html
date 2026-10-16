@@ -22,7 +22,7 @@
       </a>
       <div class="topbar-actions">
         <div id="auth-user" class="auth-user hidden">
-          <span id="auth-username"></span>
+          <button id="profile-btn" class="auth-profile-link" type="button"></button>
           <button id="logout-btn" class="nav-btn" type="button">Đăng xuất</button>
         </div>
         <button id="auth-btn" class="nav-btn" type="button">Đăng nhập</button>
@@ -85,6 +85,7 @@
             <span>Tạo phòng đấu mới</span>
             <span>↗</span>
           </button>
+          <button id="quick-match-btn" class="secondary-button" type="button">⚡ Tìm trận nhanh theo ELO</button>
           <label class="room-password-label">
             Mật khẩu phòng (không bắt buộc)
             <input id="room-password" type="password" maxlength="64" placeholder="Để trống nếu muốn phòng công khai" autocomplete="new-password">
@@ -321,6 +322,16 @@
       </form>
       <button id="auth-switch" class="auth-switch" type="button">Chưa có tài khoản? Đăng ký</button>
     </div>
+
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-card profile-modal-card">
+        <button id="close-profile-btn" class="modal-close-btn" type="button">✕</button>
+        <p class="eyebrow">HỒ SƠ NGƯỜI CHƠI</p>
+        <h2 id="profile-name">Hồ sơ</h2>
+        <div id="profile-summary" class="profile-summary"></div>
+        <div id="profile-history" class="profile-history"></div>
+      </div>
+    </div>
   </div>
 
   <div id="bot-match-modal" class="modal hidden">
@@ -472,6 +483,7 @@
     let botMatchOptions = null;
     let gameTimer = null;
     let timeLeft = 30;
+    let authoritativeTurnDeadline = null;
 
     // Helper message display
     window.showMessage = function(text, type = 'info') {
@@ -552,7 +564,8 @@
         stopTurnTimer();
         setTimeout(() => showResultModal(state.winner, state.winReason), 600);
       } else {
-        resetTurnTimer();
+        if (!isLocalGame && authoritativeTurnDeadline) updateTurnTimer(authoritativeTurnDeadline);
+        else resetTurnTimer();
         if ((!isLocalGame && state.turn === player) || (isLocalGame && state.turn === 'p1')) {
           sound.playTurn();
         }
@@ -708,7 +721,20 @@
       $('game').classList.remove('hidden');
       $('room-label').textContent = data.code || 'LOCAL';
       $('room-code-display').textContent = data.code || 'LOCAL';
+      if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
       onStateUpdated('init');
+    }
+
+    function updateTurnTimer(deadline) {
+      authoritativeTurnDeadline = deadline;
+      stopTurnTimer();
+      const tick = () => {
+        timeLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        $('turn-timer-badge').textContent = `${timeLeft}s`;
+        if (timeLeft <= 0) stopTurnTimer();
+      };
+      tick();
+      gameTimer = setInterval(tick, 250);
     }
 
     // Setup Local Game
@@ -896,14 +922,20 @@
 
       network.on('room-update', (data) => {
         state = data.state;
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
         onStateUpdated('update');
         if (data.message) showToast(data.message, 'info');
       });
 
       network.on('state', (data) => {
         state = data.state;
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
         onStateUpdated(data.result, data.capturedPiece, data.from, data.to);
       });
+
+      network.on('matchmaking', data => showToast(data.message, 'info'));
 
       network.on('bot-speed-updated', (data) => {
         $('live-bot-speed').value = data.speed;
@@ -973,7 +1005,7 @@
         }
         listEl.innerHTML = data.leaderboard.map(item => `
           <div class="leaderboard-row${Auth.getUser()?.id === item.id ? ' is-current-user' : ''}">
-            <span class="leaderboard-rank">${item.rank}</span>
+            <span class="leaderboard-rank">${item.position}</span>
             <span class="leaderboard-name">${item.username}<small>${item.wins} thắng / ${item.games} trận</small></span>
             <strong class="leaderboard-elo">${item.elo}</strong>
           </div>
@@ -1013,6 +1045,9 @@
         });
         $('room-password').value = '';
       });
+    };
+    $('quick-match-btn').onclick = () => {
+      connectOnline(() => network.send('quick_match', { mode: selectedMode }));
     };
 
     $('join-form').onsubmit = (e) => {
@@ -1146,8 +1181,23 @@
       $('auth-btn').classList.toggle('hidden', Boolean(user));
       if (user) {
         const elo = Number(user.elo);
-        $('auth-username').textContent = `👤 ${user.username} · ${Number.isFinite(elo) && elo >= 0 ? elo : 100} ELO`;
+        $('profile-btn').textContent = `👤 ${user.username} · ${Number.isFinite(elo) && elo >= 0 ? elo : 100} ELO`;
       }
+    }
+
+    async function openProfile() {
+      const user = Auth.getUser();
+      if (!user) return openAuth('login');
+      const response = await fetch(`/api/profile/${encodeURIComponent(user.id)}`);
+      const data = await response.json();
+      if (!response.ok) return showToast(data.error || 'Không thể tải hồ sơ.', 'error');
+      const profile = data.profile;
+      $('profile-name').textContent = profile.username;
+      $('profile-summary').innerHTML = `<strong>${profile.elo} ELO</strong> · ${profile.rank}<br>${profile.wins} thắng / ${profile.games} trận`;
+      $('profile-history').innerHTML = profile.matches.length
+        ? profile.matches.map(match => `<div class="profile-match ${match.result}"><strong>${match.result === 'win' ? '🏆 Thắng' : '💔 Thua'}</strong> trước ${match.opponent}<span>${match.change > 0 ? '+' : ''}${match.change} ELO · ${match.mode}</span></div>`).join('')
+        : '<p>Chưa có lịch sử trận đấu.</p>';
+      $('profile-modal').classList.remove('hidden');
     }
 
     function openAuth(mode = 'login') {
@@ -1161,6 +1211,8 @@
     }
 
     $('auth-btn').onclick = () => openAuth('login');
+    $('profile-btn').onclick = () => openProfile().catch(error => showToast(error.message, 'error'));
+    $('close-profile-btn').onclick = () => $('profile-modal').classList.add('hidden');
     $('close-auth-btn').onclick = () => $('auth-modal').classList.add('hidden');
     $('auth-switch').onclick = () => openAuth(authMode === 'login' ? 'register' : 'login');
     $('logout-btn').onclick = async () => {

@@ -340,6 +340,45 @@ button:active {
   margin: 4px 0;
 }
 
+.auth-profile-link {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.profile-summary {
+  background: #f1eee5;
+  border-radius: 8px;
+  padding: 14px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.profile-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  max-height: 280px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.profile-match {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.profile-match.win strong { color: var(--green); }
+.profile-match.loss strong { color: var(--red); }
+.profile-match span { color: var(--muted); }
+
 /* Lobby Right Panel */
 .lobby-panel-container {
   display: flex;

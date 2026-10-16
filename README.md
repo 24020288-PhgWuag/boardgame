@@ -59,6 +59,29 @@ $env:BOT_SCRIPT = "bots/random_bot.py"
 npm start
 ```
 
+### Hồ sơ, ELO và tìm trận
+
+Tài khoản có hồ sơ với hạng Đồng/Bạc/Vàng/Kim cương, lịch sử 30 trận gần nhất
+và thay đổi ELO sau từng trận. Nút **Tìm trận nhanh theo ELO** ghép người chơi
+đang chờ với đối thủ chênh lệch tối đa 250 ELO. Mỗi lượt online có 30 giây;
+server là nguồn thời gian chính và xử thắng khi hết giờ.
+
+Dữ liệu tài khoản và lịch sử trận được lưu trong `data/boardgame.sqlite`.
+Server tự migrate dữ liệu cũ từ `data/users.json` lần đầu chạy. SQLite dùng
+`node:sqlite`, vì vậy cần Node.js 22.5+ (khuyến nghị Node.js 24+).
+
+### Trang quản trị
+
+Mở `http://localhost:3000/admin.html`. API quản trị yêu cầu tài khoản khớp
+với biến môi trường `ADMIN_USERNAME`:
+
+```powershell
+$env:ADMIN_USERNAME = "quangphuong"
+npm start
+```
+
+Trang quản trị hiện hiển thị danh sách tài khoản, ELO, hạng và số trận.
+
 Bot chỉ gửi một hành động đã thử. Server vẫn giữ trạng thái thật, kiểm tra luật,
 áp dụng nước đi và xác định người thắng.
 
@@ -120,6 +143,11 @@ Bot Minimax có thể đấu với bot mặc định:
 ```powershell
 npm run bot:match -- classic 200 bots/minimax_bot.py bots/random_bot.py
 ```
+
+`bots/guardian_bot.py` là bot phòng thủ chiến thuật: ưu tiên thắng ngay, chặn
+nước thắng kế tiếp của đối thủ, tránh tự làm mất quân cuối cùng của một loại,
+đánh giá nguy cơ bị phản công và ưu tiên các nước ăn an toàn. Bot vẫn dùng
+cùng giao thức JSON Lines và có thể chạy trong giải đấu như các bot khác.
 
 Bot Random chọn ngẫu nhiên có trọng số giữa mọi nước đi hợp lệ, vẫn ưu tiên
 nhẹ các nước ăn được quân hoặc tiến về căn cứ nên không lặp lại một đường đi

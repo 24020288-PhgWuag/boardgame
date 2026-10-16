@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTT V2 // Quản trị</title>
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong></a></header>
+    <section class="lobby-panel" style="margin:40px auto; max-width:900px;">
+      <p class="eyebrow">QUẢN TRỊ</p>
+      <h1>Người chơi</h1>
+      <p id="admin-message" class="message"></p>
+      <div id="admin-users"></div>
+    </section>
+  </main>
+  <script>
+    fetch('/api/admin/users').then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không có quyền.');
+      document.getElementById('admin-users').innerHTML = data.users.map(user =>
+        `<div style="display:grid;grid-template-columns:1fr repeat(4,auto);gap:18px;padding:12px;border-bottom:1px solid var(--line)">
+          <strong>${user.username}</strong><span>${user.rank}</span><span>${user.elo} ELO</span><span>${user.wins}/${user.games} thắng</span><small>${user.createdAt}</small>
+        </div>`).join('');
+    }).catch(error => document.getElementById('admin-message').textContent = error.message);
+  </script>
+</body>
+</html>

@@ -145,6 +145,7 @@ class RoomManager {
           room.bot?.stop();
           room.botMatch?.p1?.stop();
           room.botMatch?.p2?.stop();
+          clearTimeout(room.turnTimer);
           this.rooms.delete(code);
           return { code, empty: true };
         }

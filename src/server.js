@@ -17,7 +17,13 @@ app.use(express.json({ limit: '256kb' }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
-const auth = new AuthStore(path.join(__dirname, '..', 'data', 'users.json'));
+const auth = new AuthStore(
+  path.join(__dirname, '..', 'data', 'boardgame.sqlite'),
+  path.join(__dirname, '..', 'data', 'users.json')
+);
+const requestWindows = new Map();
+const matchmakingQueue = [];
+const TURN_LIMIT_MS = 30 * 1000;
 const BOT_MATCH_SPEEDS = {
   slow: 1500,
   medium: 900,
@@ -140,6 +146,23 @@ app.get('/api/auth/me', (req, res) => {
 
 app.get('/api/leaderboard', (req, res) => {
   res.json({ leaderboard: auth.getLeaderboard() });
+});
+
+app.get('/api/profile/:id', (req, res) => {
+  const profile = auth.getProfile(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Không tìm thấy người chơi.' });
+  res.json({ profile });
+});
+
+function requireAdmin(req, res, next) {
+  const user = getRequestUser(req);
+  if (!user || !auth.isAdmin(user.id)) return res.status(403).json({ error: 'Bạn không có quyền quản trị.' });
+  req.user = user;
+  next();
+}
+
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+  res.json({ users: auth.listUsers() });
 });
 
 app.post('/api/auth/register', (req, res) => {
@@ -311,7 +334,8 @@ function broadcastState(room, outcome, from, to, player) {
     capturedPiece: outcome.capturedPiece,
     from,
     to,
-    lastPlayer: player
+    lastPlayer: player,
+    turnDeadline: room.turnDeadline || null
   });
 }
 
@@ -325,7 +349,7 @@ function settleOnlineRating(room) {
 
   const winner = users[room.state.winner];
   const loser = users[room.state.winner === 'p1' ? 'p2' : 'p1'];
-  const result = auth.recordMatch(winner.id, loser.id);
+  const result = auth.recordMatch(winner.id, loser.id, room.mode, room.state.winReason);
   if (!result) return null;
   room.ratingUpdated = true;
   broadcast(room, 'rating-updated', {
@@ -334,6 +358,33 @@ function settleOnlineRating(room) {
     change: result.change
   });
   return result;
+}
+
+function setTurnDeadline(room) {
+  clearTimeout(room.turnTimer);
+  if (!room || room.state.winner || room.bot || room.botMatch || room.sockets.size < 2) return;
+  room.turnDeadline = Date.now() + TURN_LIMIT_MS;
+  room.turnTimer = setTimeout(() => {
+    if (!room.state.winner && room.turnDeadline <= Date.now()) {
+      room.state.winner = room.state.turn === 'p1' ? 'p2' : 'p1';
+      room.state.winReason = 'Đối thủ hết thời gian lượt đi.';
+      room.state.turn = room.state.winner;
+      broadcastState(room, { result: 'timeout' }, null, null, null);
+      settleOnlineRating(room);
+    }
+  }, TURN_LIMIT_MS + 100);
+}
+
+function rateLimitSocket(socket, type) {
+  const now = Date.now();
+  const key = `${socket.user?.id || socket._socket?.remoteAddress || 'anonymous'}:${type}`;
+  const previous = requestWindows.get(key) || [];
+  const recent = previous.filter(timestamp => now - timestamp < 1000);
+  const limit = type === 'move' ? 8 : 30;
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  requestWindows.set(key, recent);
+  return true;
 }
 
 function forfeitBot(room, reason) {
@@ -447,6 +498,7 @@ function scheduleBotMatchTurn(room) {
 wss.on('connection', (socket, req) => {
   socket.isAlive = true;
   socket.user = getRequestUser(req);
+  socket.rateLimited = false;
 
   socket.on('message', (raw) => {
     let message;
@@ -454,6 +506,9 @@ wss.on('connection', (socket, req) => {
       message = JSON.parse(raw);
     } catch {
       return send(socket, 'error', { message: 'Gói tin không hợp lệ.' });
+    }
+    if (!rateLimitSocket(socket, message.type || 'unknown')) {
+      return send(socket, 'error', { message: 'Bạn gửi yêu cầu quá nhanh. Hãy thử lại sau.' });
     }
 
     // Ping / Pong for latency
@@ -464,6 +519,27 @@ wss.on('connection', (socket, req) => {
     // Request rooms list
     if (message.type === 'list_rooms') {
       return send(socket, 'rooms_list', { rooms: rooms.getPublicRooms() });
+    }
+
+    if (message.type === 'quick_match') {
+      if (!socket.user) return send(socket, 'auth_required', { message: 'Bạn cần đăng nhập để tìm trận.' });
+      const existing = matchmakingQueue.find(item => item.socket !== socket && Math.abs(item.elo - socket.user.elo) <= 250);
+      if (existing) {
+        matchmakingQueue.splice(matchmakingQueue.indexOf(existing), 1);
+        const room = rooms.createRoom(message.mode || 'army');
+        const first = rooms.joinRoom(room.code, existing.socket);
+        const second = rooms.joinRoom(room.code, socket);
+        room.state.players.p1 = existing.socket.user.username;
+        room.state.players.p2 = socket.user.username;
+        existing.socket.roomCode = room.code;
+        socket.roomCode = room.code;
+        send(existing.socket, 'joined', { code: room.code, player: first.player, state: room.state, mode: room.mode });
+        send(socket, 'joined', { code: room.code, player: second.player, state: room.state, mode: room.mode });
+        setTurnDeadline(room);
+        return;
+      }
+      matchmakingQueue.push({ socket, elo: socket.user.elo, mode: message.mode || 'army' });
+      return send(socket, 'matchmaking', { waiting: true, message: 'Đang tìm đối thủ có ELO gần bạn...' });
     }
 
     if (['create', 'join', 'create_bot_match'].includes(message.type) && !socket.user) {
@@ -494,9 +570,11 @@ wss.on('connection', (socket, req) => {
         player: joined.player,
         state: room.state,
         mode: room.mode,
-        bot: Boolean(room.bot)
+        bot: Boolean(room.bot),
+        turnDeadline: room.turnDeadline || null
       });
       broadcastRooms();
+      setTurnDeadline(room);
       return;
     }
 
@@ -584,16 +662,19 @@ wss.on('connection', (socket, req) => {
       if (joined.player === 'p1' || joined.player === 'p2') {
         joined.room.state.players[joined.player] = socket.user.username;
       }
+      setTurnDeadline(joined.room);
       send(socket, 'joined', {
         code: joined.room.code,
         player: joined.player,
         state: joined.room.state,
-        mode: joined.room.mode
+        mode: joined.room.mode,
+        turnDeadline: joined.room.turnDeadline || null
       });
       broadcast(joined.room, 'room-update', {
         state: joined.room.state,
         event: 'player_joined',
-        player: joined.player
+        player: joined.player,
+        turnDeadline: joined.room.turnDeadline || null
       });
       broadcastRooms();
       return;
@@ -609,6 +690,14 @@ wss.on('connection', (socket, req) => {
       if (player === 'spectator') {
         return send(socket, 'error', { message: 'Khán giả không thể thực hiện nước đi.' });
       }
+      if (room.turnDeadline && Date.now() > room.turnDeadline) {
+        room.state.winner = room.state.turn === 'p1' ? 'p2' : 'p1';
+        room.state.winReason = 'Đối thủ hết thời gian lượt đi.';
+        room.state.turn = room.state.winner;
+        broadcastState(room, { result: 'timeout' }, null, null, null);
+        settleOnlineRating(room);
+        return;
+      }
 
       const outcome = applyMove(
         room.state,
@@ -623,6 +712,7 @@ wss.on('connection', (socket, req) => {
       const from = message.from || message.action?.from;
       const to = message.to || message.action?.to;
       broadcastState(room, outcome, from, to, player);
+      setTurnDeadline(room);
       if (room.state.winner) settleOnlineRating(room);
       requestBotTurn(room);
       return;
@@ -636,6 +726,7 @@ wss.on('connection', (socket, req) => {
 
       rooms.resetRoom(room.code, message.mode);
       room.ratingUpdated = false;
+      setTurnDeadline(room);
       if (room.bot) {
         room.state.players.p2 = 'p2';
       }
@@ -673,6 +764,8 @@ wss.on('connection', (socket, req) => {
   });
 
   socket.on('close', () => {
+    const queued = matchmakingQueue.findIndex(item => item.socket === socket);
+    if (queued >= 0) matchmakingQueue.splice(queued, 1);
     const result = rooms.remove(socket);
     if (result && !result.empty && result.room) {
       broadcast(result.room, 'room-update', {
