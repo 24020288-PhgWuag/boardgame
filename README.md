@@ -16,7 +16,9 @@ Mở `http://localhost:3000` trong hai tab trình duyệt. Một người tạo 
 Để tạo hoặc tham gia phòng online, hãy đăng ký/đăng nhập bằng nút **Đăng nhập** ở góc trên sảnh.
 Tên tài khoản sẽ được hiển thị trên thẻ người chơi trong trận. Mật khẩu được băm bằng `scrypt`;
 thông tin tài khoản được lưu tại `data/users.json` (không lưu mật khẩu dạng rõ). Chế độ chơi
-với Bot và Pass & Play vẫn có thể bắt đầu mà không cần đăng nhập.
+với Bot và Pass & Play vẫn có thể bắt đầu mà không cần đăng nhập. Mỗi tài khoản bắt đầu ở
+100 ELO; sau mỗi trận online giữa hai tài khoản, người thắng nhận ELO và người thua bị trừ
+theo chênh lệch xếp hạng. Bảng xếp hạng có thể xem ngay tại sảnh.
 
 Chọn **Đấu với Bot (AI)** để tạo một phòng do server quản lý với bot Python ở phía P2.
 Bot mặc định chạy từ `bots/random_bot.py` qua JSON Lines trên stdin/stdout.

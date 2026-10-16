@@ -258,6 +258,72 @@ button:active {
   line-height: 1.45;
 }
 
+.leaderboard-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 18px;
+}
+
+.leaderboard-panel h3 {
+  margin: 5px 0 0;
+  font-size: 17px;
+}
+
+.leaderboard-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.leaderboard-row.is-current-user {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgba(42, 157, 143, 0.12);
+}
+
+.leaderboard-rank {
+  color: var(--muted);
+  font: 600 12px 'DM Mono', monospace;
+  text-align: center;
+}
+
+.leaderboard-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaderboard-name small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.leaderboard-elo {
+  color: var(--red);
+  font: 600 14px 'DM Mono', monospace;
+}
+
+.leaderboard-empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
 /* Lobby Right Panel */
 .lobby-panel-container {
   display: flex;

@@ -138,6 +138,10 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: getRequestUser(req) });
 });
 
+app.get('/api/leaderboard', (req, res) => {
+  res.json({ leaderboard: auth.getLeaderboard() });
+});
+
 app.post('/api/auth/register', (req, res) => {
   const result = auth.createUser(String(req.body?.username || ''), req.body?.password);
   if (result.error) return res.status(400).json({ error: result.error });
@@ -304,6 +308,27 @@ function broadcastState(room, outcome, from, to, player) {
     to,
     lastPlayer: player
   });
+}
+
+function settleOnlineRating(room) {
+  if (!room || room.ratingUpdated || room.bot || room.botMatch || !room.state.winner) return null;
+  const users = {};
+  for (const [socket, role] of room.sockets.entries()) {
+    if ((role === 'p1' || role === 'p2') && socket.user) users[role] = socket.user;
+  }
+  if (!users.p1 || !users.p2) return null;
+
+  const winner = users[room.state.winner];
+  const loser = users[room.state.winner === 'p1' ? 'p2' : 'p1'];
+  const result = auth.recordMatch(winner.id, loser.id);
+  if (!result) return null;
+  room.ratingUpdated = true;
+  broadcast(room, 'rating-updated', {
+    winner: result.winner,
+    loser: result.loser,
+    change: result.change
+  });
+  return result;
 }
 
 function forfeitBot(room, reason) {
@@ -582,6 +607,7 @@ wss.on('connection', (socket, req) => {
       const from = message.from || message.action?.from;
       const to = message.to || message.action?.to;
       broadcastState(room, outcome, from, to, player);
+      if (room.state.winner) settleOnlineRating(room);
       requestBotTurn(room);
       return;
     }
@@ -593,6 +619,7 @@ wss.on('connection', (socket, req) => {
       if (!room || !player) return;
 
       rooms.resetRoom(room.code, message.mode);
+      room.ratingUpdated = false;
       if (room.bot) {
         room.state.players.p2 = 'p2';
       }

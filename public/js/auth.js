@@ -2,8 +2,8 @@ window.Auth = (() => {
   let user = null;
   const listeners = new Set();
 
-  function notify() {
-    listeners.forEach(listener => listener(user));
+  function notify(options = {}) {
+    listeners.forEach(listener => listener(user, options));
   }
 
   async function request(url, options = {}) {
@@ -22,6 +22,10 @@ window.Auth = (() => {
       return () => listeners.delete(listener);
     },
     getUser() { return user; },
+    setUser(nextUser) {
+      user = nextUser;
+      notify({ preserveConnection: true });
+    },
     async load() {
       const data = await request('/api/auth/me');
       user = data.user;

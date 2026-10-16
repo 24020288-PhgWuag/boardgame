@@ -17,7 +17,28 @@ class AuthStore {
     if (!fs.existsSync(this.filePath)) return [];
     try {
       const users = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-      return Array.isArray(users) ? users : [];
+      if (!Array.isArray(users)) return [];
+      let changed = false;
+      const normalizedUsers = users.map(user => {
+        const elo = Number(user.elo);
+        const games = Number(user.games);
+        const wins = Number(user.wins);
+        const normalized = {
+          ...user,
+          elo: Number.isFinite(elo) && elo >= 0 ? elo : 100,
+          games: Number.isFinite(games) && games >= 0 ? games : 0,
+          wins: Number.isFinite(wins) && wins >= 0 ? wins : 0
+        };
+        if (normalized.elo !== user.elo || normalized.games !== user.games || normalized.wins !== user.wins) {
+          changed = true;
+        }
+        return normalized;
+      });
+      if (changed) {
+        this.users = normalizedUsers;
+        this.saveUsers();
+      }
+      return normalizedUsers;
     } catch (error) {
       console.error('Không thể đọc dữ liệu tài khoản:', error.message);
       return [];
@@ -66,6 +87,9 @@ class AuthStore {
       id: crypto.randomUUID(),
       username: normalizedUsername,
       passwordHash: this.hashPassword(password),
+      elo: 100,
+      games: 0,
+      wins: 0,
       createdAt: new Date().toISOString()
     };
     this.users.push(user);
@@ -92,7 +116,12 @@ class AuthStore {
       this.sessions.delete(token);
       return null;
     }
-    return { id: session.id, username: session.username };
+    const user = this.users.find(item => item.id === session.id);
+    if (!user) {
+      this.sessions.delete(token);
+      return null;
+    }
+    return this.publicUser(user);
   }
 
   destroySession(token) {
@@ -100,7 +129,48 @@ class AuthStore {
   }
 
   publicUser(user) {
-    return { id: user.id, username: user.username };
+    const elo = Number(user.elo);
+    const games = Number(user.games);
+    const wins = Number(user.wins);
+    return {
+      id: user.id,
+      username: user.username,
+      elo: Number.isFinite(elo) && elo >= 0 ? elo : 100,
+      games: Number.isFinite(games) && games >= 0 ? games : 0,
+      wins: Number.isFinite(wins) && wins >= 0 ? wins : 0
+    };
+  }
+
+  getLeaderboard(limit = 50) {
+    return this.users
+      .map(user => this.publicUser(user))
+      .sort((a, b) => b.elo - a.elo || b.wins - a.wins || a.username.localeCompare(b.username))
+      .slice(0, limit)
+      .map((user, index) => ({ rank: index + 1, ...user }));
+  }
+
+  recordMatch(winnerId, loserId) {
+    if (!winnerId || !loserId || winnerId === loserId) return null;
+    const winner = this.users.find(user => user.id === winnerId);
+    const loser = this.users.find(user => user.id === loserId);
+    if (!winner || !loser) return null;
+
+    const winnerElo = Number.isFinite(winner.elo) ? winner.elo : 100;
+    const loserElo = Number.isFinite(loser.elo) ? loser.elo : 100;
+    const expectedWinner = 1 / (1 + (10 ** ((loserElo - winnerElo) / 400)));
+    const change = Math.max(1, Math.round(32 * (1 - expectedWinner)));
+
+    winner.elo = winnerElo + change;
+    loser.elo = Math.max(0, loserElo - change);
+    winner.games = (Number.isFinite(winner.games) ? winner.games : 0) + 1;
+    loser.games = (Number.isFinite(loser.games) ? loser.games : 0) + 1;
+    winner.wins = (Number.isFinite(winner.wins) ? winner.wins : 0) + 1;
+    this.saveUsers();
+    return {
+      winner: this.publicUser(winner),
+      loser: this.publicUser(loser),
+      change
+    };
   }
 }
 

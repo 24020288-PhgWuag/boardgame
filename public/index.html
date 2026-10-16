@@ -129,6 +129,19 @@
             <!-- Dynamic open rooms -->
           </div>
         </div>
+
+        <div class="leaderboard-panel">
+          <div class="open-rooms-header">
+            <div>
+              <div class="panel-kicker">XẾP HẠNG NGƯỜI CHƠI</div>
+              <h3>Đấu trường ELO</h3>
+            </div>
+            <button id="refresh-leaderboard-btn" class="nav-btn" type="button" style="padding:4px 8px; font-size:11px;">Làm mới</button>
+          </div>
+          <div id="leaderboard-list" class="leaderboard-list">
+            <p class="leaderboard-empty">Đang tải bảng xếp hạng...</p>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -909,6 +922,16 @@
         renderPublicRooms(data.rooms);
       });
 
+      network.on('rating-updated', (data) => {
+        const user = Auth.getUser();
+        if (user && (user.id === data.winner.id || user.id === data.loser.id)) {
+          const updated = user.id === data.winner.id ? data.winner : data.loser;
+          Auth.setUser(updated);
+          showToast(`ELO mới: ${updated.elo} (${user.id === data.winner.id ? '+' : '-'}${data.change})`, 'info');
+        }
+        loadLeaderboard();
+      });
+
       network.on('error', (data) => {
         $('lobby-message').textContent = data.message;
         showToast(data.message, 'error');
@@ -932,6 +955,28 @@
           <button class="room-join-btn" onclick="joinByCode('${r.code}')">Vào đấu</button>
         </div>
       `).join('');
+    }
+
+    async function loadLeaderboard() {
+      const listEl = $('leaderboard-list');
+      try {
+        const response = await fetch('/api/leaderboard');
+        if (!response.ok) throw new Error('Không thể tải bảng xếp hạng.');
+        const data = await response.json();
+        if (!data.leaderboard.length) {
+          listEl.innerHTML = '<p class="leaderboard-empty">Chưa có người chơi nào.</p>';
+          return;
+        }
+        listEl.innerHTML = data.leaderboard.map(item => `
+          <div class="leaderboard-row${Auth.getUser()?.id === item.id ? ' is-current-user' : ''}">
+            <span class="leaderboard-rank">${item.rank}</span>
+            <span class="leaderboard-name">${item.username}<small>${item.wins} thắng / ${item.games} trận</small></span>
+            <strong class="leaderboard-elo">${item.elo}</strong>
+          </div>
+        `).join('');
+      } catch (error) {
+        listEl.innerHTML = `<p class="leaderboard-empty">${error.message}</p>`;
+      }
     }
 
     window.joinByCode = function(code) {
@@ -1075,12 +1120,16 @@
     $('rules-btn').onclick = () => $('rules-modal').classList.remove('hidden');
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
+    $('refresh-leaderboard-btn').onclick = loadLeaderboard;
 
     let authMode = 'login';
     function updateAuthUI(user) {
       $('auth-user').classList.toggle('hidden', !user);
       $('auth-btn').classList.toggle('hidden', Boolean(user));
-      if (user) $('auth-username').textContent = `👤 ${user.username}`;
+      if (user) {
+        const elo = Number(user.elo);
+        $('auth-username').textContent = `👤 ${user.username} · ${Number.isFinite(elo) && elo >= 0 ? elo : 100} ELO`;
+      }
     }
 
     function openAuth(mode = 'login') {
@@ -1123,17 +1172,19 @@
         $('auth-submit').disabled = false;
       }
     };
-    Auth.onChange(user => {
+    Auth.onChange((user, options = {}) => {
       updateAuthUI(user);
-      if (network) {
+      if (network && !options.preserveConnection) {
         network.socket?.close();
         network = null;
       }
+      loadLeaderboard();
     });
 
     // Auto connect and join from URL query (?room=CODE)
     window.addEventListener('DOMContentLoaded', () => {
       Auth.load().catch(error => showToast(error.message, 'error'));
+      loadLeaderboard();
       connectOnline(() => {
         network.send('list_rooms');
       });

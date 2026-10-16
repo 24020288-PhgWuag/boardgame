@@ -20,7 +20,8 @@ class RoomManager {
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
       spectators: new Set(),
       bot: null,
-      botMatch: null
+      botMatch: null,
+      ratingUpdated: false
     };
     this.rooms.set(code, room);
     return room;
