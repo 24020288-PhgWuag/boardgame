@@ -20,6 +20,10 @@ với Bot và Pass & Play vẫn có thể bắt đầu mà không cần đăng n
 100 ELO; sau mỗi trận online giữa hai tài khoản, người thắng nhận ELO và người thua bị trừ
 theo chênh lệch xếp hạng. Bảng xếp hạng có thể xem ngay tại sảnh.
 
+Khi tạo phòng online, trường **Mật khẩu phòng** có thể để trống để tạo phòng công khai hoặc
+điền mật khẩu để giới hạn người tham gia. Các phòng đang chờ sẽ tự động xuất hiện trong danh
+sách **Phòng đang chờ người** của những người chơi khác; phòng có mật khẩu được đánh dấu 🔒.
+
 Chọn **Đấu với Bot (AI)** để tạo một phòng do server quản lý với bot Python ở phía P2.
 Bot mặc định chạy từ `bots/random_bot.py` qua JSON Lines trên stdin/stdout.
 

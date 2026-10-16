@@ -299,6 +299,11 @@ function broadcast(room, type, payload = {}) {
   }
 }
 
+function broadcastRooms() {
+  const payload = { rooms: rooms.getPublicRooms() };
+  for (const socket of wss.clients) send(socket, 'rooms_list', payload);
+}
+
 function broadcastState(room, outcome, from, to, player) {
   broadcast(room, 'state', {
     state: room.state,
@@ -468,7 +473,11 @@ wss.on('connection', (socket, req) => {
     // Create room
     if (message.type === 'create') {
       const mode = message.mode || 'army';
-      const room = rooms.createRoom(mode);
+      const password = typeof message.password === 'string' ? message.password.trim() : '';
+      if (password.length > 64) {
+        return send(socket, 'error', { message: 'Mật khẩu phòng tối đa 64 ký tự.' });
+      }
+      const room = rooms.createRoom(mode, password);
       const joined = rooms.joinRoom(room.code, socket);
       room.state.players[joined.player] = socket.user.username;
       socket.roomCode = room.code;
@@ -487,6 +496,7 @@ wss.on('connection', (socket, req) => {
         mode: room.mode,
         bot: Boolean(room.bot)
       });
+      broadcastRooms();
       return;
     }
 
@@ -561,6 +571,11 @@ wss.on('connection', (socket, req) => {
     // Join room
     if (message.type === 'join') {
       const code = String(message.code || '').trim().toUpperCase();
+      const room = rooms.getRoom(code);
+      if (!room) return send(socket, 'error', { message: 'Không tìm thấy phòng đấu với mã này.' });
+      if (!rooms.verifyRoomPassword(room, message.password)) {
+        return send(socket, 'error', { message: 'Mật khẩu phòng không đúng.' });
+      }
       const joined = rooms.joinRoom(code, socket, message.role);
       if (joined.error) {
         return send(socket, 'error', { message: joined.error });
@@ -580,6 +595,7 @@ wss.on('connection', (socket, req) => {
         event: 'player_joined',
         player: joined.player
       });
+      broadcastRooms();
       return;
     }
 
@@ -666,6 +682,7 @@ wss.on('connection', (socket, req) => {
         message: `${result.disconnectedRole === 'p1' ? 'Đội Đỏ (P1)' : 'Đội Xanh (P2)'} đã thoát phòng.`
       });
     }
+    broadcastRooms();
   });
 });
 

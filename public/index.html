@@ -85,6 +85,10 @@
             <span>Tạo phòng đấu mới</span>
             <span>↗</span>
           </button>
+          <label class="room-password-label">
+            Mật khẩu phòng (không bắt buộc)
+            <input id="room-password" type="password" maxlength="64" placeholder="Để trống nếu muốn phòng công khai" autocomplete="new-password">
+          </label>
 
           <div class="divider"><span>hoặc nhập mã phòng</span></div>
 
@@ -950,9 +954,9 @@
         <div class="room-item">
           <div>
             <span class="room-code-tag">${r.code}</span>
-            <span style="font-size:11px; margin-left:6px; color:var(--muted);">${r.mode.toUpperCase()} · ${r.players}/2 Người</span>
+            <span style="font-size:11px; margin-left:6px; color:var(--muted);">${r.mode.toUpperCase()} · ${r.players}/2 Người ${r.passwordProtected ? '· 🔒 Có mật khẩu' : '· Công khai'}</span>
           </div>
-          <button class="room-join-btn" onclick="joinByCode('${r.code}')">Vào đấu</button>
+          <button class="room-join-btn" onclick="joinByCode('${r.code}', ${r.passwordProtected})">Vào đấu</button>
         </div>
       `).join('');
     }
@@ -979,9 +983,16 @@
       }
     }
 
-    window.joinByCode = function(code) {
+    window.joinByCode = function(code, passwordProtected = false) {
+      let password = '';
+      if (passwordProtected) {
+        password = window.prompt('Nhập mật khẩu phòng:') || '';
+        if (!password) return;
+      } else if (passwordProtected === null) {
+        password = window.prompt('Nhập mật khẩu phòng (để trống nếu phòng không có mật khẩu):') || '';
+      }
       connectOnline(() => {
-        network.send('join', { code });
+        network.send('join', { code, password });
       });
     };
 
@@ -996,7 +1007,11 @@
 
     $('create-room').onclick = () => {
       connectOnline(() => {
-        network.send('create', { mode: selectedMode });
+        network.send('create', {
+          mode: selectedMode,
+          password: $('room-password').value.trim()
+        });
+        $('room-password').value = '';
       });
     };
 
@@ -1007,7 +1022,7 @@
         showToast('Vui lòng nhập mã phòng!', 'warning');
         return;
       }
-      joinByCode(code);
+      joinByCode(code, null);
     };
 
     $('btn-vs-bot').onclick = () => {
@@ -1121,6 +1136,9 @@
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
     $('refresh-leaderboard-btn').onclick = loadLeaderboard;
+    $('refresh-rooms-btn').onclick = () => {
+      if (network && network.connected) network.send('list_rooms');
+    };
 
     let authMode = 'login';
     function updateAuthUI(user) {
@@ -1194,7 +1212,7 @@
       if (queryRoom) {
         $('room-code').value = queryRoom.toUpperCase();
         setTimeout(() => {
-          if (Auth.getUser()) joinByCode(queryRoom);
+          if (Auth.getUser()) joinByCode(queryRoom, null);
           else openAuth('login');
         }, 300);
       }
