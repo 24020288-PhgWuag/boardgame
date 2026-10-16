@@ -1,0 +1,14 @@
+[
+  {
+    "id": "3c94bee7-1b8c-4aa3-96be-a32863e45e9e",
+    "username": "quangphuong",
+    "passwordHash": "7c9e55e2889e0cea5811b13a7668647e:e7a2ad6894b624480fae64e7a3682dc174978f131ccca96a90287b7a02db3ae905ba3d17bd946f47528905617f5c7825991c5d1c54af37252bd98e4f5631b8c5",
+    "createdAt": "2026-10-16T03:13:00.800Z"
+  },
+  {
+    "id": "10e84f0f-e096-446e-b241-d7327cda1c5f",
+    "username": "quy3501",
+    "passwordHash": "28efcb5a6c424928319f0982d7a15d4c:3f5a47542651340de685ad6f89f12e42d11b80d529da36c0f852ade9a068b21ae90179d3a05328d85d6d3a8cd1b20e3a16af1444f664bc41ed7f6bef38c5c05b",
+    "createdAt": "2026-10-16T03:15:38.843Z"
+  }
+]

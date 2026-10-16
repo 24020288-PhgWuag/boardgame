@@ -21,6 +21,11 @@
         </div>
       </a>
       <div class="topbar-actions">
+        <div id="auth-user" class="auth-user hidden">
+          <span id="auth-username"></span>
+          <button id="logout-btn" class="nav-btn" type="button">Đăng xuất</button>
+        </div>
+        <button id="auth-btn" class="nav-btn" type="button">Đăng nhập</button>
         <button id="rules-btn" class="nav-btn" type="button" title="Xem luật chơi">
           <span>📖</span> Luật chơi
         </button>
@@ -281,6 +286,26 @@
   </main>
 
   <!-- 3. MODALS -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-card auth-modal-card">
+      <button id="close-auth-btn" class="modal-close-btn" type="button">✕</button>
+      <p class="eyebrow">TÀI KHOẢN NGƯỜI CHƠI</p>
+      <h2 id="auth-title">Đăng nhập</h2>
+      <p class="modal-reason">Đăng nhập để tạo phòng và lưu danh tính trong các trận đấu online.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Tên tài khoản
+          <input id="auth-username-input" required minlength="3" maxlength="24" autocomplete="username">
+        </label>
+        <label>Mật khẩu
+          <input id="auth-password-input" required minlength="8" maxlength="128" type="password" autocomplete="current-password">
+        </label>
+        <p id="auth-message" class="message"></p>
+        <button id="auth-submit" class="primary-button" type="submit">Đăng nhập</button>
+      </form>
+      <button id="auth-switch" class="auth-switch" type="button">Chưa có tài khoản? Đăng ký</button>
+    </div>
+  </div>
+
   <div id="bot-match-modal" class="modal hidden">
     <div class="modal-card">
       <p class="eyebrow">BOT ĐẤU BOT</p>
@@ -408,6 +433,7 @@
   <script src="/js/graphics/renderer.js"></script>
   <script src="/js/boardView.js"></script>
   <script src="/js/clientNetwork.js"></script>
+  <script src="/js/auth.js"></script>
 
   <!-- Main Game Client Script -->
   <script>
@@ -536,11 +562,15 @@
 
       // Player cards connection state
       if (isLocalGame) {
+        $('p1-name').textContent = 'Đội Đỏ';
+        $('p2-name').textContent = isBotGame ? 'Bot AI' : 'Đội Xanh';
         $('p1-state').textContent = 'Đang chơi tại máy';
         $('p2-state').textContent = isBotGame ? 'Máy (Bot AI)' : 'Đang chơi tại máy';
       } else {
-        $('p1-state').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Python Bot' : (state.players.p1 ? 'Đã sẵn sàng' : 'Chờ kết nối...');
-        $('p2-state').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Python Bot' : (isBotGame ? 'Máy (Python Bot)' : (state.players.p2 ? 'Đã sẵn sàng' : 'Chờ kết nối...'));
+        $('p1-name').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Bot P1' : state.players.p1 || 'Đội Đỏ';
+        $('p2-name').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Bot P2' : (isBotGame ? 'Bot AI' : state.players.p2 || 'Đội Xanh');
+          $('p1-state').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Python Bot' : (state.players.p1 ? state.players.p1 : 'Chờ kết nối...');
+          $('p2-state').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Python Bot' : (isBotGame ? 'Máy (Python Bot)' : (state.players.p2 ? state.players.p2 : 'Chờ kết nối...'));
       }
 
       // Role badges
@@ -829,6 +859,10 @@
         $('connection').classList.add('online');
         if (callback) callback();
       });
+      network.on('auth_required', data => {
+        showToast(data.message || 'Bạn cần đăng nhập để chơi online.', 'warning');
+        $('auth-modal').classList.remove('hidden');
+      });
 
       network.on('latency', (ms) => {
         $('connection').textContent = `ONLINE (${ms}ms)`;
@@ -1042,8 +1076,64 @@
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
 
+    let authMode = 'login';
+    function updateAuthUI(user) {
+      $('auth-user').classList.toggle('hidden', !user);
+      $('auth-btn').classList.toggle('hidden', Boolean(user));
+      if (user) $('auth-username').textContent = `👤 ${user.username}`;
+    }
+
+    function openAuth(mode = 'login') {
+      authMode = mode;
+      $('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản';
+      $('auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Đăng ký';
+      $('auth-switch').textContent = mode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập';
+      $('auth-password-input').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+      $('auth-message').textContent = '';
+      $('auth-modal').classList.remove('hidden');
+    }
+
+    $('auth-btn').onclick = () => openAuth('login');
+    $('close-auth-btn').onclick = () => $('auth-modal').classList.add('hidden');
+    $('auth-switch').onclick = () => openAuth(authMode === 'login' ? 'register' : 'login');
+    $('logout-btn').onclick = async () => {
+      try {
+        await Auth.logout();
+        showToast('Đã đăng xuất.', 'info');
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    };
+    $('auth-form').onsubmit = async (event) => {
+      event.preventDefault();
+      const username = $('auth-username-input').value.trim();
+      const password = $('auth-password-input').value;
+      $('auth-submit').disabled = true;
+      $('auth-message').textContent = '';
+      try {
+        if (authMode === 'login') await Auth.login(username, password);
+        else await Auth.register(username, password);
+        $('auth-modal').classList.add('hidden');
+        $('auth-form').reset();
+        showToast(authMode === 'login' ? 'Đăng nhập thành công.' : 'Tạo tài khoản thành công.', 'info');
+      } catch (error) {
+        $('auth-message').textContent = error.message;
+        $('auth-message').className = 'message error';
+      } finally {
+        $('auth-submit').disabled = false;
+      }
+    };
+    Auth.onChange(user => {
+      updateAuthUI(user);
+      if (network) {
+        network.socket?.close();
+        network = null;
+      }
+    });
+
     // Auto connect and join from URL query (?room=CODE)
     window.addEventListener('DOMContentLoaded', () => {
+      Auth.load().catch(error => showToast(error.message, 'error'));
       connectOnline(() => {
         network.send('list_rooms');
       });
@@ -1052,7 +1142,10 @@
       const queryRoom = params.get('room');
       if (queryRoom) {
         $('room-code').value = queryRoom.toUpperCase();
-        setTimeout(() => joinByCode(queryRoom), 300);
+        setTimeout(() => {
+          if (Auth.getUser()) joinByCode(queryRoom);
+          else openAuth('login');
+        }, 300);
       }
     });
   </script>

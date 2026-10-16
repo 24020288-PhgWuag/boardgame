@@ -10,12 +10,14 @@ const { applyMove, createBotSnapshot } = require('./gameState');
 const { createReplay, saveReplay } = require('./replay');
 const { runMatch } = require('./matchRunner');
 const TournamentManager = require('./tournamentManager');
+const { AuthStore } = require('./authStore');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
+const auth = new AuthStore(path.join(__dirname, '..', 'data', 'users.json'));
 const BOT_MATCH_SPEEDS = {
   slow: 1500,
   medium: 900,
@@ -30,6 +32,27 @@ const SUBMISSION_DIR = path.join(__dirname, '..', 'bots', 'submissions');
 const TOURNAMENT_DIR = path.join(__dirname, '..', 'matches', 'tournaments');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(SUBMISSION_DIR, { recursive: true });
+
+function parseCookies(header = '') {
+  return header.split(';').reduce((cookies, part) => {
+    const separator = part.indexOf('=');
+    if (separator < 0) return cookies;
+    cookies[part.slice(0, separator).trim()] = decodeURIComponent(part.slice(separator + 1).trim());
+    return cookies;
+  }, {});
+}
+
+function getRequestUser(req) {
+  return auth.getSession(parseCookies(req.headers.cookie).ott_session);
+}
+
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', `ott_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'ott_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+}
 
 function getUploadedBot(botId) {
   if (typeof botId !== 'string' || !botId.startsWith('uploaded:')) return null;
@@ -110,6 +133,30 @@ function saveBotMatchReplay(room) {
 
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ user: getRequestUser(req) });
+});
+
+app.post('/api/auth/register', (req, res) => {
+  const result = auth.createUser(String(req.body?.username || ''), req.body?.password);
+  if (result.error) return res.status(400).json({ error: result.error });
+  setSessionCookie(res, auth.createSession(result.user));
+  res.status(201).json({ user: result.user });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const user = auth.authenticate(String(req.body?.username || ''), req.body?.password);
+  if (!user) return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không đúng.' });
+  setSessionCookie(res, auth.createSession(user));
+  res.json({ user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  auth.destroySession(parseCookies(req.headers.cookie).ott_session);
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
 
 // Specific route aliases for playfull.html / playful.html
 app.get('/playfull.html', (req, res) => {
@@ -367,8 +414,9 @@ function scheduleBotMatchTurn(room) {
   }, room.botMatch.delayMs);
 }
 
-wss.on('connection', (socket) => {
+wss.on('connection', (socket, req) => {
   socket.isAlive = true;
+  socket.user = getRequestUser(req);
 
   socket.on('message', (raw) => {
     let message;
@@ -388,11 +436,16 @@ wss.on('connection', (socket) => {
       return send(socket, 'rooms_list', { rooms: rooms.getPublicRooms() });
     }
 
+    if (['create', 'join', 'create_bot_match'].includes(message.type) && !socket.user) {
+      return send(socket, 'auth_required', { message: 'Bạn cần đăng nhập để chơi online.' });
+    }
+
     // Create room
     if (message.type === 'create') {
       const mode = message.mode || 'army';
       const room = rooms.createRoom(mode);
       const joined = rooms.joinRoom(room.code, socket);
+      room.state.players[joined.player] = socket.user.username;
       socket.roomCode = room.code;
       if (message.bot === true) {
         room.bot = new BotProcess({
@@ -488,6 +541,9 @@ wss.on('connection', (socket) => {
         return send(socket, 'error', { message: joined.error });
       }
       socket.roomCode = joined.room.code;
+      if (joined.player === 'p1' || joined.player === 'p2') {
+        joined.room.state.players[joined.player] = socket.user.username;
+      }
       send(socket, 'joined', {
         code: joined.room.code,
         player: joined.player,
