@@ -25,6 +25,7 @@
     .match-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px; border-radius: var(--radius-sm); background: rgba(23,33,31,.045); }
     .match-row a { white-space: nowrap; }
     .tournament-status { text-transform: uppercase; font-size: .75rem; letter-spacing: .08em; color: var(--green); }
+    .champion { margin: 12px 0; padding: 12px; border-radius: var(--radius-sm); background: #fff4c2; color: #6b4e00; }
     @media (max-width: 760px) { .tournament-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -39,7 +40,7 @@
     <section class="tournament-shell">
       <p class="eyebrow">GIẢI ĐẤU TRÍ TUỆ NHÂN TẠO</p>
       <h1>Giải đấu bot</h1>
-      <p class="muted">Chọn các bot để thi đấu vòng tròn hai lượt. Mỗi cặp đổi bên Đỏ và Xanh ở lượt thứ hai.</p>
+      <p class="muted">Chọn các bot để thi đấu vòng tròn hoặc loại trực tiếp. Với 12 bot, giải loại trực tiếp gồm vòng 1/8, tứ kết, bán kết và chung kết.</p>
       <div class="tournament-grid">
         <form id="create-form" class="tournament-card">
           <h2>Tạo giải đấu</h2>
@@ -60,11 +61,17 @@
               <option value="classic">3v3 Nhanh</option><option value="tactical">6v6 Chiến thuật</option><option value="army" selected>9v9 Đại chiến</option>
             </select>
           </label>
+          <label class="tournament-field">Thể thức
+            <select id="tournament-format">
+              <option value="single-elimination">Đấu loại trực tiếp</option>
+              <option value="round-robin-two-legs">Vòng tròn hai lượt</option>
+            </select>
+          </label>
           <label class="tournament-field">Giới hạn lượt mỗi trận
             <input id="max-turns" type="number" min="20" max="2000" value="300">
           </label>
           <div class="tournament-field"><strong>Chọn từ 2 đến 12 bot</strong><div id="bot-list" class="bot-checklist">Đang tải danh sách bot…</div></div>
-          <button class="primary-button" type="submit">Bắt đầu giải vòng tròn</button>
+          <button class="primary-button" type="submit">Bắt đầu giải đấu</button>
           <p id="form-status" class="muted" aria-live="polite"></p>
         </form>
         <section class="tournament-card">
@@ -121,10 +128,13 @@
       const progress = `${tournament.completedMatches ?? matches.filter(match => match.status === 'completed').length}/${tournament.matchCount ?? matches.length} trận`;
       const tournamentStatus = { queued: 'Sẵn sàng', running: 'Đang diễn ra', completed: 'Hoàn tất', failed: 'Gặp lỗi' }[tournament.status] || tournament.status;
       const modeLabels = { classic: '3v3 Nhanh', tactical: '6v6 Chiến thuật', army: '9v9 Đại chiến' };
+      const formatLabel = tournament.format === 'single-elimination' ? 'Loại trực tiếp' : 'Vòng tròn hai lượt';
+      const champion = tournament.champion ? `<div class="champion">🏆 Nhà vô địch: <strong>${escapeHtml(tournament.champion)}</strong></div>` : '';
       return `<article class="tournament-item" data-tournament-id="${escapeHtml(tournament.id)}">
         <div class="tournament-status">${escapeHtml(tournamentStatus)} · ${progress}</div>
         <h3>${escapeHtml(tournament.name)}</h3>
-        <div class="tournament-meta">${modeLabels[tournament.mode] || escapeHtml(tournament.mode)} · Vòng tròn hai lượt · ${new Date(tournament.createdAt).toLocaleString('vi-VN')}</div>
+        <div class="tournament-meta">${modeLabels[tournament.mode] || escapeHtml(tournament.mode)} · ${formatLabel} · ${new Date(tournament.createdAt).toLocaleString('vi-VN')}</div>
+        ${champion}
         ${tournament.error ? `<p class="muted">${escapeHtml(tournament.error)}</p>` : ''}
         <table class="standings"><thead><tr><th>Hạng</th><th>Bot</th><th>Trận</th><th>Thắng</th><th>Hòa</th><th>Thua</th><th>Điểm</th></tr></thead><tbody>${rows}</tbody></table>
         <details ${expandedTournamentIds.has(tournament.id) ? 'open' : ''}><summary>Lịch đấu và replay</summary><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div></details>
@@ -158,6 +168,7 @@
             name: name || document.getElementById('tournament-name').value,
             mode: document.getElementById('tournament-mode').value,
             maxTurns: Number(document.getElementById('max-turns').value),
+            format: document.getElementById('tournament-format').value,
             botIds
           })
         });

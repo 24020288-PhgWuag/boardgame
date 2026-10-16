@@ -31,7 +31,8 @@ const BOT_MATCH_SPEEDS = {
 };
 const BOT_MATCH_SCRIPTS = {
   random: 'bots/random_bot.py',
-  minimax: 'bots/minimax_bot.py'
+  minimax: 'bots/minimax_bot.py',
+  guardian: 'bots/guardian_bot.py'
 };
 const UPLOAD_DIR = path.join(__dirname, '..', 'bots', 'uploads');
 const SUBMISSION_DIR = path.join(__dirname, '..', 'bots', 'submissions');
@@ -260,7 +261,8 @@ app.post('/api/tournaments', (req, res) => {
       name: req.body?.name,
       botIds: req.body?.botIds,
       mode,
-      maxTurns
+      maxTurns,
+      format: req.body?.format === 'single-elimination' ? 'single-elimination' : 'round-robin-two-legs'
     });
     const { bots, ...publicTournament } = tournament;
     res.status(201).json({ tournament: {

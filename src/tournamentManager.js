@@ -47,7 +47,7 @@ class TournamentManager {
     return { ...bot, sha256, script: path.relative(this.directory, snapshotPath) };
   }
 
-  create({ name, botIds, mode, maxTurns }) {
+  create({ name, botIds, mode, maxTurns, format = 'round-robin-two-legs' }) {
     if (!Array.isArray(botIds) || botIds.length < 2 || botIds.length > 12) {
       throw new Error('Hãy chọn từ 2 đến 12 bot.');
     }
@@ -60,27 +60,14 @@ class TournamentManager {
     });
 
     const id = tournamentId;
-    const matches = [];
-    for (let a = 0; a < bots.length; a++) {
-      for (let b = a + 1; b < bots.length; b++) {
-        for (const [p1, p2] of [[bots[a], bots[b]], [bots[b], bots[a]]]) {
-          matches.push({
-            id: `${id}-${String(matches.length + 1).padStart(3, '0')}`,
-            p1BotId: p1.id,
-            p2BotId: p2.id,
-            p1BotName: p1.name,
-            p2BotName: p2.name,
-            status: 'queued',
-            result: null
-          });
-        }
-      }
-    }
+    const matches = format === 'single-elimination'
+      ? this.createKnockoutMatches(id, bots)
+      : this.createRoundRobinMatches(id, bots);
 
     const tournament = {
       id,
       name: String(name || '').trim().slice(0, 60) || 'Bot Round Robin',
-      format: 'round-robin-two-legs',
+      format,
       mode,
       maxTurns,
       bots,
@@ -94,6 +81,42 @@ class TournamentManager {
     return tournament;
   }
 
+  createRoundRobinMatches(id, bots) {
+    const matches = [];
+    for (let a = 0; a < bots.length; a++) {
+      for (let b = a + 1; b < bots.length; b++) {
+        for (const [p1, p2] of [[bots[a], bots[b]], [bots[b], bots[a]]]) {
+          matches.push(this.matchRecord(id, matches.length, p1, p2, 0));
+        }
+      }
+    }
+    return matches;
+  }
+
+  matchRecord(id, index, p1, p2, round, status = 'queued') {
+    return {
+      id: `${id}-${String(index + 1).padStart(3, '0')}`,
+      round,
+      p1BotId: p1?.id || null,
+      p2BotId: p2?.id || null,
+      p1BotName: p1?.name || 'Bye',
+      p2BotName: p2?.name || 'Bye',
+      status,
+      result: null
+    };
+  }
+
+  createKnockoutMatches(id, bots) {
+    const bracketSize = 2 ** Math.ceil(Math.log2(bots.length));
+    const seeded = [...bots];
+    while (seeded.length < bracketSize) seeded.push(null);
+    const matches = [];
+    for (let index = 0; index < bracketSize / 2; index++) {
+      matches.push(this.matchRecord(id, matches.length, seeded[index], seeded[bracketSize - 1 - index], 1));
+    }
+    return matches;
+  }
+
   standings(tournament) {
     const rows = tournament.bots.map(bot => ({
       botId: bot.id, name: bot.name, played: 0, wins: 0, draws: 0, losses: 0, points: 0
@@ -103,6 +126,7 @@ class TournamentManager {
       if (match.status !== 'completed' || !match.result) continue;
       const p1 = byId.get(match.p1BotId);
       const p2 = byId.get(match.p2BotId);
+      if (!p1 || !p2) continue;
       p1.played++;
       p2.played++;
       if (!match.result.winnerBotId) {
@@ -141,40 +165,90 @@ class TournamentManager {
     this.write(tournament);
 
     const byId = new Map(tournament.bots.map(bot => [bot.id, bot]));
-    for (const match of tournament.matches) {
-      if (match.status === 'completed') continue;
-      match.status = 'running';
-      tournament.updatedAt = new Date().toISOString();
-      this.write(tournament);
-      const frozenP1 = byId.get(match.p1BotId);
-      const frozenP2 = byId.get(match.p2BotId);
-      const botP1 = frozenP1 && { ...frozenP1, script: path.resolve(this.directory, frozenP1.script) };
-      const botP2 = frozenP2 && { ...frozenP2, script: path.resolve(this.directory, frozenP2.script) };
-      if (!botP1 || !botP2) throw new Error('Không tìm thấy bản bot đã lưu cho giải này.');
-      const replayPath = path.join(this.directory, 'replays', `${match.id}.json`);
-      const result = await this.runMatch({
-        mode: tournament.mode,
-        maxTurns: tournament.maxTurns,
-        botP1,
-        botP2,
-        matchId: match.id,
-        replayPath
-      });
-      match.status = 'completed';
-      match.result = {
-        winnerBotId: result.winner === 'p1' ? match.p1BotId : result.winner === 'p2' ? match.p2BotId : null,
-        winnerBotName: result.winner ? byId.get(result.winner === 'p1' ? match.p1BotId : match.p2BotId).name : null,
-        turns: result.turns,
-        draw: result.draw,
-        reason: result.reason,
-        replayFile: result.replayFile ? path.basename(result.replayFile) : null
-      };
-      tournament.updatedAt = new Date().toISOString();
-      this.write(tournament);
+    if (tournament.format === 'single-elimination') {
+      await this.playKnockout(tournament, byId);
+    } else {
+      await this.playRoundRobin(tournament, byId);
     }
     tournament.status = 'completed';
     tournament.completedAt = new Date().toISOString();
     tournament.updatedAt = tournament.completedAt;
+    this.write(tournament);
+  }
+
+  async playRoundRobin(tournament, byId) {
+    for (const match of tournament.matches) {
+      if (match.status === 'completed') continue;
+      await this.playMatch(tournament, match, byId);
+    }
+  }
+
+  async playKnockout(tournament, byId) {
+    let round = 1;
+    while (true) {
+      const current = tournament.matches.filter(match => match.round === round);
+      if (!current.length) break;
+      for (const match of current) {
+        if (match.status !== 'completed') await this.playMatch(tournament, match, byId);
+      }
+      const winners = current.map(match => match.result?.winnerBotId).filter(Boolean);
+      if (winners.length <= 1) {
+        tournament.champion = winners[0] ? byId.get(winners[0]).name : null;
+        break;
+      }
+      const nextRound = round + 1;
+      const nextMatches = [];
+      for (let index = 0; index < winners.length; index += 2) {
+        const p1 = byId.get(winners[index]);
+        const p2 = byId.get(winners[index + 1]);
+        nextMatches.push(this.matchRecord(tournament.id, tournament.matches.length + nextMatches.length, p1, p2, nextRound));
+      }
+      tournament.matches.push(...nextMatches);
+      tournament.updatedAt = new Date().toISOString();
+      this.write(tournament);
+      round = nextRound;
+    }
+  }
+
+  async playMatch(tournament, match, byId) {
+    if (!match.p1BotId || !match.p2BotId) {
+      const winnerBotId = match.p1BotId || match.p2BotId;
+      match.status = 'completed';
+      match.result = { winnerBotId, winnerBotName: byId.get(winnerBotId)?.name || null, bye: true, draw: false };
+      this.write(tournament);
+      return;
+    }
+    match.status = 'running';
+    tournament.updatedAt = new Date().toISOString();
+    this.write(tournament);
+    const frozenP1 = byId.get(match.p1BotId);
+    const frozenP2 = byId.get(match.p2BotId);
+    const botP1 = frozenP1 && { ...frozenP1, script: path.resolve(this.directory, frozenP1.script) };
+    const botP2 = frozenP2 && { ...frozenP2, script: path.resolve(this.directory, frozenP2.script) };
+    if (!botP1 || !botP2) throw new Error('Không tìm thấy bản bot đã lưu cho giải này.');
+    let result;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      result = await this.runMatch({
+        mode: tournament.mode,
+        maxTurns: tournament.maxTurns,
+        botP1,
+        botP2,
+        matchId: `${match.id}-tie${attempt}`,
+        replayPath: path.join(this.directory, 'replays', `${match.id}-tie${attempt}.json`)
+      });
+      if (result.winner) break;
+    }
+    if (!result.winner) throw new Error(`Trận ${match.id} hòa sau 3 lượt phân định.`);
+    match.status = 'completed';
+    match.result = {
+      winnerBotId: result.winner === 'p1' ? match.p1BotId : match.p2BotId,
+      winnerBotName: byId.get(result.winner === 'p1' ? match.p1BotId : match.p2BotId).name,
+      turns: result.turns,
+      draw: false,
+      reason: result.reason,
+      replayFile: result.replayFile ? path.basename(result.replayFile) : null
+    };
+    tournament.updatedAt = new Date().toISOString();
     this.write(tournament);
   }
 

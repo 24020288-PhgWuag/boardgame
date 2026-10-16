@@ -178,9 +178,15 @@ người thắng với kết quả đã lưu.
 
 ### Giải đấu bot
 
-Mở **🏆 Bot Tournament** từ sảnh để chọn 2–12 bot, chế độ bàn cờ và giới hạn
-lượt. Mỗi cặp bot đấu hai ván, đổi bên P1/P2 ở ván thứ hai. Thắng được 1 điểm,
-hòa 0.5 điểm. Bảng xếp hạng, tiến độ và replay được lưu trong
+Mở **🏆 Bot Tournament** từ sảnh để chọn 2–12 bot, chế độ bàn cờ, thể thức và
+giới hạn lượt. Thể thức **Đấu loại trực tiếp** tự tạo bracket theo lũy thừa của
+2 gần nhất; với 12 bot, 4 bot được bye ở vòng đầu, sau đó đấu tứ kết, bán kết
+và chung kết. Trận hòa được chạy tối đa 3 lượt phân định; bot thắng được đi
+tiếp và nhà vô địch hiển thị trên trang giải.
+
+Thể thức **Vòng tròn hai lượt** giữ nguyên cách cũ: mỗi cặp bot đấu hai ván,
+đổi bên P1/P2 ở ván thứ hai. Thắng được 1 điểm, hòa 0.5 điểm. Bảng xếp hạng,
+tiến độ và replay được lưu trong
 `matches/tournaments/`; replay cũng xuất hiện trong trình xem replay. Bot tải
 lên từ giao diện được lưu thành phiên bản bất biến trong `bots/submissions/`.
 Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi khởi động lại server.
