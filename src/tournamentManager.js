@@ -44,7 +44,13 @@ class TournamentManager {
     const snapshotPath = path.join(this.directory, 'snapshots', tournamentId, `${sha256}.py`);
     fs.mkdirSync(path.dirname(snapshotPath), { recursive: true });
     if (!fs.existsSync(snapshotPath)) fs.writeFileSync(snapshotPath, source, { flag: 'wx' });
-    return { ...bot, sha256, script: path.relative(this.directory, snapshotPath) };
+    return {
+      ...bot,
+      untrusted: current?.untrusted ?? bot.untrusted ??
+        /^(submission:|uploaded:)/.test(bot.id || ''),
+      sha256,
+      script: path.relative(this.directory, snapshotPath)
+    };
   }
 
   create({ name, botIds, mode, maxTurns, format = 'round-robin-two-legs' }) {

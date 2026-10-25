@@ -74,6 +74,7 @@ function getBotDefinition(botId) {
   let script = null;
   let name = null;
   let sha256 = null;
+  let untrusted = false;
   if (Object.prototype.hasOwnProperty.call(BOT_MATCH_SCRIPTS, botId)) {
     script = path.join(__dirname, '..', BOT_MATCH_SCRIPTS[botId]);
     name = getBotDisplayName(botId);
@@ -85,14 +86,16 @@ function getBotDefinition(botId) {
     const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     name = metadata.name;
     sha256 = metadata.sha256;
+    untrusted = true;
   } else {
     script = getUploadedBot(botId);
     if (!script) return null;
     name = getBotDisplayName(botId);
+    untrusted = true;
   }
   if (!fs.existsSync(script)) return null;
   sha256 ||= crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
-  return { id: botId, name, script, sha256 };
+  return { id: botId, name, script, sha256, untrusted };
 }
 
 const tournaments = new TournamentManager(TOURNAMENT_DIR, {
@@ -674,11 +677,13 @@ wss.on('connection', (socket, req) => {
         p1: new BotProcess({
           cwd: path.join(__dirname, '..'),
           script: botP1Definition.script,
+          sandboxed: botP1Definition.untrusted,
           onError: error => console.error(`Bot P1 error in room ${room.code}:`, error.message)
         }),
         p2: new BotProcess({
           cwd: path.join(__dirname, '..'),
           script: botP2Definition.script,
+          sandboxed: botP2Definition.untrusted,
           onError: error => console.error(`Bot P2 error in room ${room.code}:`, error.message)
         })
       };

@@ -39,9 +39,38 @@ của P1/P2.
 
 Trong hộp thoại Bot đấu Bot, chọn file Python của bạn (`.py`, tối đa 256 KB)
 và nhấn **Tải bot lên**. Bot sẽ xuất hiện trong danh sách P1/P2 và được chạy
-bằng cùng giao thức JSON Lines như các bot có sẵn. Bot phải đọc một JSON object
+bằng Docker cách ly (cần Docker Engine) và cùng giao thức JSON Lines như các bot
+có sẵn. Bot phải đọc một JSON object
 trên mỗi dòng từ `stdin`, trả về một JSON object trên mỗi dòng ở `stdout`, và
 ghi log chẩn đoán vào `stderr`.
+
+### Bảo vệ khi chạy bot không đáng tin
+
+Bot tải lên và bot đăng ký giải cộng đồng không được chạy trực tiếp bằng Python
+trên host. Tạo image runner một lần:
+
+```powershell
+docker build -f .\docker\bot-runner.Dockerfile -t boardgame-python-bot:latest .\docker
+```
+
+Có thể đổi tên image bằng `BOT_DOCKER_IMAGE` hoặc executable Docker bằng
+`DOCKER_BIN`. Runner dùng `--network none`, filesystem chỉ đọc, mount chỉ file
+bot ở chế độ read-only, user không đặc quyền, bỏ toàn bộ Linux capabilities,
+`no-new-privileges`, giới hạn 128 MiB RAM / 0.5 CPU / 32 process, giới hạn
+file descriptor và kích thước file, cùng `/tmp` 16 MiB `noexec`. Python chạy
+ở chế độ isolated (`-I -S`). Mỗi lượt có timeout 5 giây mặc định; timeout,
+JSON sai hoặc output vượt 64 KiB sẽ dừng tiến trình/container. Đổi executable,
+image và timeout bằng cấu hình của `BotProcess` nếu cần.
+Trận headless có thời hạn tối đa 30 phút mặc định (`BOT_MATCH_TIMEOUT_MS`);
+khi hết giờ, các bot bị dừng và trận được tính hòa.
+
+Các giới hạn container giảm đáng kể phạm vi ảnh hưởng nhưng không phải ranh
+giới bảo mật tuyệt đối: bot vẫn chạy mã native qua runtime, và container dùng
+chung kernel host. Với dịch vụ công khai, chạy Docker trên worker/VM riêng,
+không mount socket Docker hay dữ liệu host, luôn vá kernel/runtime và ưu tiên
+runtime có cách ly kernel như gVisor/Kata Containers. Pin image theo digest đã
+kiểm tra trong production. Tiếp tục áp dụng quota upload, xác thực/giới hạn tốc
+độ API, hàng đợi có giới hạn concurrency, giám sát và xóa container sau trận.
 
 Mỗi trận bot-vs-bot hoàn tất cũng được tự động lưu thành replay trong thư mục
 `matches/`. Tên file có dạng

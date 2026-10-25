@@ -1,0 +1,7 @@
+FROM python:3.12-slim-bookworm
+
+RUN mkdir -p /bot && chmod 0555 /bot
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+USER 65534:65534
+WORKDIR /tmp
