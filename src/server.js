@@ -457,6 +457,7 @@ async function pumpMatchResults() {
   const batch = [...pendingMatchResults.entries()].slice(0, 100);
   try {
     await matchResultSheets.enqueueMatchResults(batch.map(([, record]) => record));
+    console.info(`Queued ${batch.length} completed match result(s) for the Google Sheets worker.`);
     for (const [matchId, record] of batch) {
       if (pendingMatchResults.get(matchId) === record) pendingMatchResults.delete(matchId);
     }
@@ -480,14 +481,18 @@ function queueRoomMatchResult(room) {
   const bot2 = isBotMatch
     ? room.botMatch.botP2Name
     : room.state.players.p2 || 'P2';
-  recordMatchResult({
-    matchId: room.matchResultId || crypto.randomUUID(),
+  const matchId = room.matchResultId || crypto.randomUUID();
+  const queued = recordMatchResult({
+    matchId,
     bot1: String(bot1).slice(0, 100),
     bot2: String(bot2).slice(0, 100),
     winner: room.state.winner === 'p1' ? 'bot1' : 'bot2',
     playedAt: new Date().toISOString()
   });
-  room.resultQueued = true;
+  if (queued) {
+    room.resultQueued = true;
+    console.info(`Completed multiplayer match ${matchId} queued for Google Sheets.`);
+  }
 }
 
 function settleOnlineRating(room) {
@@ -944,6 +949,9 @@ const port = process.env.PORT || 3000;
 server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);
+  console.log(process.env.GOOGLE_APPLICATION_CREDENTIALS
+    ? `Automatic match results enabled (queue: ${process.env.MATCH_RESULTS_QUEUE === 'memory' ? 'memory' : 'Redis'}).`
+    : 'Automatic match results disabled: GOOGLE_APPLICATION_CREDENTIALS is not configured.');
   tournaments.resume();
   matchResultSheets.startWorker();
 });

@@ -190,6 +190,14 @@ trận người-vs-bot, bot-vs-bot và trận giải đấu sẽ tự đưa vào
 worker ghi batch xuống Google Sheets. API cũng có thể nhận kết quả từ một
 producer ngoài:
 
+Trang multiplayer kết nối WebSocket tới cùng host đang phục vụ trang
+(`location.host`). Nếu dùng link production, phải deploy code backend mới và
+cấu hình credentials, Redis/queue trên chính server production đó; `.env` trên
+máy local chỉ áp dụng cho `localhost`. Khi server khởi động, log cho biết chức
+năng tự đồng bộ đã bật hay chưa. Khi hoàn tất một trận, log `Completed
+multiplayer match ... queued...`, sau đó worker báo `Appended ... to Google
+Sheets.` nếu ghi thành công.
+
 ```text
 POST /api/match-results
 Authorization: Bearer <MATCH_INGEST_TOKEN>
