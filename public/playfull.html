@@ -23,6 +23,11 @@
         </div>
       </a>
       <div class="topbar-actions">
+        <div id="auth-user" class="auth-user hidden">
+          <span id="auth-username" class="auth-profile-link"></span>
+          <button id="logout-btn" class="nav-btn" type="button">Đăng xuất</button>
+        </div>
+        <button id="auth-btn" class="nav-btn" type="button">Đăng nhập</button>
         <button id="rules-btn" class="nav-btn" type="button" title="Xem luật chơi">
           <span>📖</span> Luật chơi
         </button>
@@ -281,11 +286,31 @@
   </main>
 
   <!-- 3. MODALS -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-card auth-modal-card">
+      <button id="close-auth-btn" class="modal-close-btn" type="button">✕</button>
+      <p class="eyebrow">TÀI KHOẢN NGƯỜI CHƠI</p>
+      <h2 id="auth-title">Đăng nhập</h2>
+      <p class="modal-reason">Dùng tài khoản trên server này để chơi multiplayer và Bot đấu Bot.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Tên tài khoản
+          <input id="auth-username-input" required minlength="3" maxlength="24" autocomplete="username">
+        </label>
+        <label>Mật khẩu
+          <input id="auth-password-input" required minlength="8" maxlength="128" type="password" autocomplete="current-password">
+        </label>
+        <p id="auth-message" class="message"></p>
+        <button id="auth-submit" class="primary-button" type="submit">Đăng nhập</button>
+      </form>
+      <button id="auth-switch" class="auth-switch" type="button">Chưa có tài khoản? Đăng ký</button>
+    </div>
+  </div>
+
   <div id="bot-match-modal" class="modal hidden">
     <div class="modal-card">
       <p class="eyebrow">BOT ĐẤU BOT</p>
       <h2>Thiết lập trận đấu</h2>
-      <p class="modal-reason">Chọn bot cho từng bên.</p>
+      <p class="modal-reason">Chọn bot cho từng bên. Cần đăng nhập để bắt đầu trận online.</p>
       <div style="display:grid; gap:14px; text-align:left; margin:20px 0;">
         <label>
           <strong>Thêm bot Python của bạn</strong>
@@ -408,6 +433,7 @@
   <script src="/js/graphics/renderer.js"></script>
   <script src="/js/boardView.js"></script>
   <script src="/js/clientNetwork.js"></script>
+  <script src="/js/auth.js"></script>
 
   <!-- Main Game Client Script -->
   <script>
@@ -427,6 +453,10 @@
     let isBotGame = false;
     let isBotMatch = false;
     let botMatchOptions = null;
+    let authMode = 'login';
+    let pendingBotMatchOptions = null;
+    let authStateLoaded = false;
+    let currentAuthUser = null;
     let gameTimer = null;
     let timeLeft = 30;
 
@@ -811,7 +841,15 @@
         $('connection').classList.remove('online');
       });
 
+      network.on('auth_required', (data) => {
+        const message = data.message || 'Bạn cần đăng nhập để bắt đầu trận online.';
+        $('lobby-message').textContent = `${message} Hãy đăng nhập ở trang chủ rồi quay lại.`;
+        showToast(message, 'warning');
+        openAuth('login');
+      });
+
       network.on('joined', (data) => {
+        if (data.botMatch) pendingBotMatchOptions = null;
         showGameView(data);
       });
 
@@ -960,15 +998,23 @@
         $('bot-upload-status').textContent = error.message;
       }
     };
+    function startBotMatch(options) {
+      pendingBotMatchOptions = options;
+      if (!Auth.getUser()) {
+        openAuth('login');
+        return;
+      }
+      $('bot-match-modal').classList.add('hidden');
+      connectOnline(() => network.send('create_bot_match', options));
+    }
+
     $('start-bot-match-btn').onclick = () => {
-      const options = {
+      startBotMatch({
         mode: selectedMode,
         botP1: $('bot-p1-select').value,
         botP2: $('bot-p2-select').value,
         speed: 'medium'
-      };
-      $('bot-match-modal').classList.add('hidden');
-      connectOnline(() => network.send('create_bot_match', options));
+      });
     };
     $('btn-pass-play').onclick = () => startLocalGame(false);
 
@@ -1011,7 +1057,81 @@
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
 
+    function openAuth(mode = 'login') {
+      authMode = mode;
+      $('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản';
+      $('auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Đăng ký';
+      $('auth-switch').textContent = mode === 'login'
+        ? 'Chưa có tài khoản? Đăng ký'
+        : 'Đã có tài khoản? Đăng nhập';
+      $('auth-password-input').setAttribute(
+        'autocomplete',
+        mode === 'login' ? 'current-password' : 'new-password'
+      );
+      $('auth-message').textContent = '';
+      $('auth-message').className = 'message';
+      $('auth-modal').classList.remove('hidden');
+    }
+
+    function updateAuthUI(user) {
+      $('auth-user').classList.toggle('hidden', !user);
+      $('auth-btn').classList.toggle('hidden', Boolean(user));
+      if (user) $('auth-username').textContent = `👤 ${user.username}`;
+    }
+
+    $('auth-btn').onclick = () => openAuth('login');
+    $('close-auth-btn').onclick = () => {
+      $('auth-modal').classList.add('hidden');
+      pendingBotMatchOptions = null;
+    };
+    $('auth-switch').onclick = () => openAuth(authMode === 'login' ? 'register' : 'login');
+    $('auth-form').onsubmit = async event => {
+      event.preventDefault();
+      $('auth-submit').disabled = true;
+      $('auth-message').textContent = '';
+      try {
+        const username = $('auth-username-input').value.trim();
+        const password = $('auth-password-input').value;
+        if (authMode === 'login') await Auth.login(username, password);
+        else await Auth.register(username, password);
+        $('auth-modal').classList.add('hidden');
+        $('auth-form').reset();
+        showToast(authMode === 'login' ? 'Đăng nhập thành công.' : 'Tạo tài khoản thành công.', 'info');
+      } catch (error) {
+        $('auth-message').textContent = error.message;
+        $('auth-message').className = 'message error';
+      } finally {
+        $('auth-submit').disabled = false;
+      }
+    };
+    $('logout-btn').onclick = async () => {
+      try {
+        await Auth.logout();
+        showToast('Đã đăng xuất.', 'info');
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    };
+    Auth.onChange(user => {
+      updateAuthUI(user);
+      const identityChanged = authStateLoaded && currentAuthUser?.id !== user?.id;
+      authStateLoaded = true;
+      currentAuthUser = user;
+      if ((identityChanged || (user && pendingBotMatchOptions)) && network) {
+        network.socket?.close();
+        network = null;
+      }
+      if (user && pendingBotMatchOptions) {
+        const options = pendingBotMatchOptions;
+        pendingBotMatchOptions = null;
+        startBotMatch(options);
+      } else if (identityChanged && !network) {
+        connectOnline(() => network.send('list_rooms'));
+      }
+    });
+
     window.addEventListener('DOMContentLoaded', () => {
+      Auth.load().catch(error => showToast(error.message, 'error'));
       connectOnline(() => {
         network.send('list_rooms');
       });

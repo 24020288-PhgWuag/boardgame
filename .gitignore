@@ -16,6 +16,7 @@ matches/tournaments/
 .env.*
 !.env.example
 credentials.json
+database-writer.json
 
 # Logs and runtime output
 npm-debug.log*
