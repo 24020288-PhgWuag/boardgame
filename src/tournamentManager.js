@@ -7,6 +7,7 @@ class TournamentManager {
     this.directory = directory;
     this.resolveBot = options.resolveBot;
     this.runMatch = options.runMatch;
+    this.onMatchComplete = options.onMatchComplete || (() => {});
     this.running = new Set();
     fs.mkdirSync(directory, { recursive: true });
   }
@@ -256,6 +257,13 @@ class TournamentManager {
     };
     tournament.updatedAt = new Date().toISOString();
     this.write(tournament);
+    this.onMatchComplete({
+      matchId: match.id,
+      bot1: botP1.name || botP1.id,
+      bot2: botP2.name || botP2.id,
+      winner: result.winner === 'p1' ? 'bot1' : 'bot2',
+      playedAt: new Date().toISOString()
+    });
   }
 
   resume() {

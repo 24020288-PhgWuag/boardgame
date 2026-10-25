@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -12,9 +14,11 @@ const { runMatch } = require('./matchRunner');
 const TournamentManager = require('./tournamentManager');
 const { AuthStore } = require('./authStore');
 const CommunityTournamentManager = require('./communityTournamentManager');
+const matchResultSheets = require('./matchResultSheets');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+app.use('/api/match-results', matchResultSheets.router);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
@@ -38,6 +42,11 @@ const BOT_MATCH_SCRIPTS = {
 const UPLOAD_DIR = path.join(__dirname, '..', 'bots', 'uploads');
 const SUBMISSION_DIR = path.join(__dirname, '..', 'bots', 'submissions');
 const TOURNAMENT_DIR = path.join(__dirname, '..', 'matches', 'tournaments');
+const pendingMatchResults = new Map();
+const MAX_PENDING_MATCH_RESULTS = 100000;
+let matchResultPump;
+let matchResultPumpActive = false;
+let reportedMissingMatchResultConfig = false;
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(SUBMISSION_DIR, { recursive: true });
 
@@ -100,7 +109,8 @@ function getBotDefinition(botId) {
 
 const tournaments = new TournamentManager(TOURNAMENT_DIR, {
   resolveBot: getBotDefinition,
-  runMatch
+  runMatch,
+  onMatchComplete: recordMatchResult
 });
 const communityTournaments = new CommunityTournamentManager(
   path.join(TOURNAMENT_DIR, 'community-events.json'),
@@ -152,6 +162,7 @@ function saveBotMatchReplay(room) {
   const filename = `${replayNamePart(room.botMatch.botP1Name)}-${replayNamePart(room.botMatch.botP2Name)}-${replayTimestamp()}.json`;
   room.botMatch.replayFile = saveReplay(replay, path.join(__dirname, '..', 'matches', filename));
   room.botMatch.replaySaved = true;
+  queueRoomMatchResult(room);
   console.log(`Saved bot match replay: ${room.botMatch.replayFile}`);
 }
 
@@ -412,6 +423,73 @@ function broadcastState(room, outcome, from, to, player) {
   });
 }
 
+function recordMatchResult(result) {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    if (!reportedMissingMatchResultConfig) {
+      reportedMissingMatchResultConfig = true;
+      console.error('Match result reporting is disabled: configure GOOGLE_APPLICATION_CREDENTIALS to enable it.');
+    }
+    return false;
+  }
+  const record = matchResultSheets.validateRecord(result);
+  if (!record) {
+    console.error('Refusing to queue an invalid completed match result.');
+    return false;
+  }
+  if (!pendingMatchResults.has(record.matchId) &&
+      pendingMatchResults.size >= MAX_PENDING_MATCH_RESULTS) {
+    console.error(`Completed match result queue is full (${MAX_PENDING_MATCH_RESULTS}); result ${record.matchId} was not queued.`);
+    return false;
+  }
+
+  pendingMatchResults.set(record.matchId, record);
+  if (!matchResultPump) {
+    matchResultPump = setInterval(pumpMatchResults, 1000);
+    matchResultPump.unref();
+  }
+  if (pendingMatchResults.size >= 100) void pumpMatchResults();
+  return true;
+}
+
+async function pumpMatchResults() {
+  if (matchResultPumpActive || !pendingMatchResults.size) return;
+  matchResultPumpActive = true;
+  const batch = [...pendingMatchResults.entries()].slice(0, 100);
+  try {
+    await matchResultSheets.enqueueMatchResults(batch.map(([, record]) => record));
+    for (const [matchId, record] of batch) {
+      if (pendingMatchResults.get(matchId) === record) pendingMatchResults.delete(matchId);
+    }
+  } catch (error) {
+    console.error(`Could not queue completed match results; will retry: ${error.message}`);
+  } finally {
+    matchResultPumpActive = false;
+    if (!pendingMatchResults.size && matchResultPump) {
+      clearInterval(matchResultPump);
+      matchResultPump = null;
+    }
+  }
+}
+
+function queueRoomMatchResult(room) {
+  if (!room?.state?.winner || room.resultQueued) return;
+  const isBotMatch = Boolean(room.botMatch);
+  const bot1 = isBotMatch
+    ? room.botMatch.botP1Name
+    : room.state.players.p1 || 'P1';
+  const bot2 = isBotMatch
+    ? room.botMatch.botP2Name
+    : room.state.players.p2 || 'P2';
+  recordMatchResult({
+    matchId: room.matchResultId || crypto.randomUUID(),
+    bot1: String(bot1).slice(0, 100),
+    bot2: String(bot2).slice(0, 100),
+    winner: room.state.winner === 'p1' ? 'bot1' : 'bot2',
+    playedAt: new Date().toISOString()
+  });
+  room.resultQueued = true;
+}
+
 function settleOnlineRating(room) {
   if (!room || room.ratingUpdated || room.bot || room.botMatch || !room.state.winner) return null;
   const users = {};
@@ -444,6 +522,7 @@ function setTurnDeadline(room) {
       room.state.turn = room.state.winner;
       broadcastState(room, { result: 'timeout' }, null, null, null);
       settleOnlineRating(room);
+      queueRoomMatchResult(room);
     }
   }, TURN_LIMIT_MS + 100);
 }
@@ -466,6 +545,7 @@ function forfeitBot(room, reason) {
   room.state.winner = 'p1';
   room.state.winReason = `Bot đã bị xử thua: ${reason}`;
   room.state.turn = 'p1';
+  queueRoomMatchResult(room);
   broadcast(room, 'state', {
     state: room.state,
     result: 'forfeit',
@@ -480,6 +560,7 @@ function forfeitBotMatch(room, player, reason) {
   room.state.winner = player === 'p1' ? 'p2' : 'p1';
   room.state.winReason = `${player === 'p1' ? 'Bot P1' : 'Bot P2'} bị xử thua: ${reason}`;
   room.state.turn = room.state.winner;
+  queueRoomMatchResult(room);
   broadcast(room, 'state', {
     state: room.state,
     result: 'forfeit',
@@ -516,6 +597,7 @@ async function requestBotTurn(room) {
     }
 
     broadcastState(room, outcome, from, to, 'p2');
+    if (room.state.winner) queueRoomMatchResult(room);
   } catch (error) {
     console.error(`Bot failure in room ${room.code}:`, error.message);
     forfeitBot(room, error.message);
@@ -771,6 +853,7 @@ wss.on('connection', (socket, req) => {
         room.state.turn = room.state.winner;
         broadcastState(room, { result: 'timeout' }, null, null, null);
         settleOnlineRating(room);
+        queueRoomMatchResult(room);
         return;
       }
 
@@ -788,7 +871,10 @@ wss.on('connection', (socket, req) => {
       const to = message.to || message.action?.to;
       broadcastState(room, outcome, from, to, player);
       setTurnDeadline(room);
-      if (room.state.winner) settleOnlineRating(room);
+      if (room.state.winner) {
+        settleOnlineRating(room);
+        queueRoomMatchResult(room);
+      }
       requestBotTurn(room);
       return;
     }
@@ -859,4 +945,22 @@ server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);
   tournaments.resume();
+  matchResultSheets.startWorker();
 });
+
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const forcedExit = setTimeout(() => process.exit(1), 10000);
+  forcedExit.unref();
+  wss.clients.forEach(socket => socket.close(1001, 'Server shutting down'));
+  server.close(async () => {
+    await matchResultSheets.stopWorker();
+    clearTimeout(forcedExit);
+    process.exit(0);
+  });
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

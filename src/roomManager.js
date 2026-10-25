@@ -16,6 +16,7 @@ class RoomManager {
       code,
       mode,
       createdAt: Date.now(),
+      matchResultId: crypto.randomUUID(),
       state: createInitialState(mode),
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
       spectators: new Set(),
@@ -92,6 +93,8 @@ class RoomManager {
     if (!room) return null;
     const currentMode = mode || room.mode || 'army';
     room.mode = currentMode;
+    room.matchResultId = crypto.randomUUID();
+    room.resultQueued = false;
     const newState = createInitialState(currentMode);
     
     // Retain connected player slots

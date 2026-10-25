@@ -183,6 +183,108 @@ nhẹ các nước ăn được quân hoặc tiến về căn cứ nên không l
 cố định. Bot Minimax dùng tìm kiếm 3 ply với alpha-beta pruning ở mọi thế cờ,
 thay vì tự giảm xuống 2 ply khi có nhiều nước đi.
 
+### Ghi kết quả trận vào Google Sheets
+
+Khi cấu hình bật tính năng này, kết quả trận hoàn tất trong phòng người chơi,
+trận người-vs-bot, bot-vs-bot và trận giải đấu sẽ tự đưa vào Redis trước khi
+worker ghi batch xuống Google Sheets. API cũng có thể nhận kết quả từ một
+producer ngoài:
+
+```text
+POST /api/match-results
+Authorization: Bearer <MATCH_INGEST_TOKEN>
+Content-Type: application/json
+```
+
+Body cho một trận:
+
+```json
+{
+  "matchId": "match-123",
+  "bot1": "alpha",
+  "bot2": "beta",
+  "winner": "bot1",
+  "playedAt": "2026-10-25T15:00:00.000Z"
+}
+```
+
+`winner` nhận `bot1`, `bot2` hoặc `draw`; `playedAt` có thể bỏ qua. Có thể
+gửi tối đa 100 trận trong `{ "results": [...] }`. Endpoint trả HTTP `202` khi
+đã nhận vào Redis; phản hồi không có nghĩa là Google Sheets đã ghi xong.
+Cùng `matchId` được bỏ qua trong 7 ngày để client có thể retry an toàn. Nếu
+hàng đợi đầy hoặc Redis không sẵn sàng, server trả `503` để caller retry có
+backoff.
+
+#### Cấu hình xác thực Google
+
+1. Tạo Google Cloud project, bật **Google Sheets API**, rồi tạo Service Account
+   và tải JSON key về máy chủ dưới tên ngoài repository.
+2. Mở JSON, lấy `client_email`, rồi chia sẻ spreadsheet
+   [ID đã cấu hình](https://docs.google.com/spreadsheets/d/1ih-uW88lfBq_e1d0meTgUvZtVWXX455aNl5nxbqNGD4/edit)
+   cho email đó với quyền **Editor**. Worker tự tạo tab `Matches` và hàng tiêu
+   đề (`matchId`, `bot1`, `bot2`, `winner`, `playedAt`) nếu chưa có.
+3. Sao chép `.env.example` thành `.env`, đặt `MATCH_INGEST_TOKEN` thành secret
+   ngẫu nhiên mạnh nếu dùng endpoint nhận dữ liệu từ bên ngoài, cập nhật
+   `GOOGLE_APPLICATION_CREDENTIALS` thành đường dẫn JSON trên host và cấu hình
+   `REDIS_URL`. Chỉ ghi tự động từ các trận trong game không cần token này.
+   `.env` và key JSON không được commit hoặc gửi cho client/bot.
+4. Chạy Redis có persistence (AOF/RDB), giới hạn truy cập mạng và đặt chính
+   sách không eviction cho queue; sau đó `npm start`. Thiếu token thì endpoint
+   bị tắt. Mọi server instance phải dùng cùng Redis.
+
+Để thử trên máy đơn chưa cài Redis, đặt `MATCH_RESULTS_QUEUE=memory` trong
+`.env`. Worker vẫn tự ghi Sheets, nhưng queue sẽ mất khi server dừng và không
+dùng chung được giữa nhiều instance. Chỉ dùng chế độ này để kiểm tra local;
+xóa biến hoặc đặt `MATCH_RESULTS_QUEUE=redis` khi chuyển sang triển khai thật.
+
+Worker chỉ cho phép một instance ghi tại một thời điểm qua Redis lock, tối đa
+500 hàng mỗi request, flush mỗi 3 giây và cách các lần append tối thiểu 1.2
+giây (tối đa khoảng 50 request/phút, thấp hơn quota Sheets phổ biến 60
+request/phút). Chỉnh qua các biến `MATCH_SHEETS_BATCH_SIZE`,
+`MATCH_SHEETS_FLUSH_INTERVAL_MS`, `MATCH_SHEETS_MIN_APPEND_INTERVAL_MS`,
+`MATCH_SHEETS_RANGE` và `MATCH_RESULTS_MAX_QUEUE`. Google Sheets không phù hợp
+làm kho dữ liệu thời gian thực cho 10.000 trận/giây: khi queue đầy, API trả
+`503`; dùng PostgreSQL/BigQuery làm nguồn dữ liệu chính, rồi xuất báo cáo sang
+Sheets theo batch. Redis persistence và backup vẫn cần thiết. Nếu timeout xảy
+ra sau khi Google đã append nhưng trước khi worker nhận phản hồi, retry có thể
+tạo dòng trùng; pipeline này là at-least-once, không cam kết exactly-once.
+
+#### Chạy thử tải có giới hạn
+
+Trên máy local/staging của bạn, sau khi Redis, credentials và server đã chạy:
+
+```powershell
+$env:MATCH_RESULTS_TEST_TOKEN = $env:MATCH_INGEST_TOKEN
+$env:MATCH_RESULTS_TEST_COUNT = "10000"
+$env:MATCH_RESULTS_TEST_CONCURRENCY = "25"
+npm run load:test
+```
+
+Script gửi số request hữu hạn, mặc định chỉ tới localhost, giới hạn concurrency
+tối đa 100 và retry `429`/`503` có backoff. Chỉ kiểm tra hệ thống bạn sở hữu;
+để nhắm staging từ xa phải đặt rõ `ALLOW_EXTERNAL_LOAD_TEST=true` và URL test.
+Tăng tải từng bước, theo dõi Redis queue depth, HTTP `503`, latency, RSS/CPU,
+Sheets API errors và quota. Dừng thử tải nếu queue tiếp tục tăng hoặc server
+thực tế bị ảnh hưởng.
+
+#### Triển khai nhiều instance
+
+Trên Linux, có thể dùng PM2 cluster cho API; Redis dùng chung đảm bảo worker
+không đồng thời append từ từng process:
+
+```bash
+npm install --global pm2
+pm2 start src/server.js --name boardgame-api -i max
+pm2 save
+pm2 startup
+```
+
+Đặt reverse proxy/load balancer với giới hạn body, TLS và rate limit theo token.
+Không public Redis hay Service Account key. Với tải vượt khả năng Sheets, ghi
+trận trước vào database/stream bền vững (PostgreSQL, Kafka hoặc Pub/Sub), sau
+đó chạy consumer xuất bản tổng hợp/batch sang Sheets; một spreadsheet cũng có
+giới hạn tổng số ô và không nên được xem như database.
+
 Hoặc chạy Minimax ở cả hai bên:
 
 ```powershell
