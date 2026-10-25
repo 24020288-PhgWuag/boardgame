@@ -11,6 +11,19 @@ npm start
 
 Mở `http://localhost:3000` trong hai tab trình duyệt. Một người tạo phòng, người còn lại nhập mã phòng.
 
+### Tài khoản người chơi
+
+Để tạo hoặc tham gia phòng online, hãy đăng ký/đăng nhập bằng nút **Đăng nhập** ở góc trên sảnh.
+Tên tài khoản sẽ được hiển thị trên thẻ người chơi trong trận. Mật khẩu được băm bằng `scrypt`;
+thông tin tài khoản được lưu tại `data/users.json` (không lưu mật khẩu dạng rõ). Chế độ chơi
+với Bot và Pass & Play vẫn có thể bắt đầu mà không cần đăng nhập. Mỗi tài khoản bắt đầu ở
+100 ELO; sau mỗi trận online giữa hai tài khoản, người thắng nhận ELO và người thua bị trừ
+theo chênh lệch xếp hạng. Bảng xếp hạng có thể xem ngay tại sảnh.
+
+Khi tạo phòng online, trường **Mật khẩu phòng** có thể để trống để tạo phòng công khai hoặc
+điền mật khẩu để giới hạn người tham gia. Các phòng đang chờ sẽ tự động xuất hiện trong danh
+sách **Phòng đang chờ người** của những người chơi khác; phòng có mật khẩu được đánh dấu 🔒.
+
 Chọn **Đấu với Bot (AI)** để tạo một phòng do server quản lý với bot Python ở phía P2.
 Bot mặc định chạy từ `bots/random_bot.py` qua JSON Lines trên stdin/stdout.
 
@@ -26,9 +39,38 @@ của P1/P2.
 
 Trong hộp thoại Bot đấu Bot, chọn file Python của bạn (`.py`, tối đa 256 KB)
 và nhấn **Tải bot lên**. Bot sẽ xuất hiện trong danh sách P1/P2 và được chạy
-bằng cùng giao thức JSON Lines như các bot có sẵn. Bot phải đọc một JSON object
+bằng Docker cách ly (cần Docker Engine) và cùng giao thức JSON Lines như các bot
+có sẵn. Bot phải đọc một JSON object
 trên mỗi dòng từ `stdin`, trả về một JSON object trên mỗi dòng ở `stdout`, và
 ghi log chẩn đoán vào `stderr`.
+
+### Bảo vệ khi chạy bot không đáng tin
+
+Bot tải lên và bot đăng ký giải cộng đồng không được chạy trực tiếp bằng Python
+trên host. Tạo image runner một lần:
+
+```powershell
+docker build -f .\docker\bot-runner.Dockerfile -t boardgame-python-bot:latest .\docker
+```
+
+Có thể đổi tên image bằng `BOT_DOCKER_IMAGE` hoặc executable Docker bằng
+`DOCKER_BIN`. Runner dùng `--network none`, filesystem chỉ đọc, mount chỉ file
+bot ở chế độ read-only, user không đặc quyền, bỏ toàn bộ Linux capabilities,
+`no-new-privileges`, giới hạn 128 MiB RAM / 0.5 CPU / 32 process, giới hạn
+file descriptor và kích thước file, cùng `/tmp` 16 MiB `noexec`. Python chạy
+ở chế độ isolated (`-I -S`). Mỗi lượt có timeout 5 giây mặc định; timeout,
+JSON sai hoặc output vượt 64 KiB sẽ dừng tiến trình/container. Đổi executable,
+image và timeout bằng cấu hình của `BotProcess` nếu cần.
+Trận headless có thời hạn tối đa 30 phút mặc định (`BOT_MATCH_TIMEOUT_MS`);
+khi hết giờ, các bot bị dừng và trận được tính hòa.
+
+Các giới hạn container giảm đáng kể phạm vi ảnh hưởng nhưng không phải ranh
+giới bảo mật tuyệt đối: bot vẫn chạy mã native qua runtime, và container dùng
+chung kernel host. Với dịch vụ công khai, chạy Docker trên worker/VM riêng,
+không mount socket Docker hay dữ liệu host, luôn vá kernel/runtime và ưu tiên
+runtime có cách ly kernel như gVisor/Kata Containers. Pin image theo digest đã
+kiểm tra trong production. Tiếp tục áp dụng quota upload, xác thực/giới hạn tốc
+độ API, hàng đợi có giới hạn concurrency, giám sát và xóa container sau trận.
 
 Mỗi trận bot-vs-bot hoàn tất cũng được tự động lưu thành replay trong thư mục
 `matches/`. Tên file có dạng
@@ -45,6 +87,29 @@ $env:PYTHON_BIN = "python"
 $env:BOT_SCRIPT = "bots/random_bot.py"
 npm start
 ```
+
+### Hồ sơ, ELO và tìm trận
+
+Tài khoản có hồ sơ với hạng Đồng/Bạc/Vàng/Kim cương, lịch sử 30 trận gần nhất
+và thay đổi ELO sau từng trận. Nút **Tìm trận nhanh theo ELO** ghép người chơi
+đang chờ với đối thủ chênh lệch tối đa 250 ELO. Mỗi lượt online có 30 giây;
+server là nguồn thời gian chính và xử thắng khi hết giờ.
+
+Dữ liệu tài khoản và lịch sử trận được lưu trong `data/boardgame.sqlite`.
+Server tự migrate dữ liệu cũ từ `data/users.json` lần đầu chạy. SQLite dùng
+`node:sqlite`, vì vậy cần Node.js 22.5+ (khuyến nghị Node.js 24+).
+
+### Trang quản trị
+
+Mở `http://localhost:3000/admin.html`. API quản trị yêu cầu tài khoản khớp
+với biến môi trường `ADMIN_USERNAME`:
+
+```powershell
+$env:ADMIN_USERNAME = "quangphuong"
+npm start
+```
+
+Trang quản trị hiện hiển thị danh sách tài khoản, ELO, hạng và số trận.
 
 Bot chỉ gửi một hành động đã thử. Server vẫn giữ trạng thái thật, kiểm tra luật,
 áp dụng nước đi và xác định người thắng.
@@ -108,10 +173,117 @@ Bot Minimax có thể đấu với bot mặc định:
 npm run bot:match -- classic 200 bots/minimax_bot.py bots/random_bot.py
 ```
 
+`bots/guardian_bot.py` là bot phòng thủ chiến thuật: ưu tiên thắng ngay, chặn
+nước thắng kế tiếp của đối thủ, tránh tự làm mất quân cuối cùng của một loại,
+đánh giá nguy cơ bị phản công và ưu tiên các nước ăn an toàn. Bot vẫn dùng
+cùng giao thức JSON Lines và có thể chạy trong giải đấu như các bot khác.
+
 Bot Random chọn ngẫu nhiên có trọng số giữa mọi nước đi hợp lệ, vẫn ưu tiên
 nhẹ các nước ăn được quân hoặc tiến về căn cứ nên không lặp lại một đường đi
 cố định. Bot Minimax dùng tìm kiếm 3 ply với alpha-beta pruning ở mọi thế cờ,
 thay vì tự giảm xuống 2 ply khi có nhiều nước đi.
+
+### Ghi kết quả trận vào Google Sheets
+
+Khi cấu hình bật tính năng này, kết quả trận hoàn tất trong phòng người chơi,
+trận người-vs-bot, bot-vs-bot và trận giải đấu sẽ tự đưa vào Redis trước khi
+worker ghi batch xuống Google Sheets. API cũng có thể nhận kết quả từ một
+producer ngoài:
+
+```text
+POST /api/match-results
+Authorization: Bearer <MATCH_INGEST_TOKEN>
+Content-Type: application/json
+```
+
+Body cho một trận:
+
+```json
+{
+  "matchId": "match-123",
+  "bot1": "alpha",
+  "bot2": "beta",
+  "winner": "bot1",
+  "playedAt": "2026-10-25T15:00:00.000Z"
+}
+```
+
+`winner` nhận `bot1`, `bot2` hoặc `draw`; `playedAt` có thể bỏ qua. Có thể
+gửi tối đa 100 trận trong `{ "results": [...] }`. Endpoint trả HTTP `202` khi
+đã nhận vào Redis; phản hồi không có nghĩa là Google Sheets đã ghi xong.
+Cùng `matchId` được bỏ qua trong 7 ngày để client có thể retry an toàn. Nếu
+hàng đợi đầy hoặc Redis không sẵn sàng, server trả `503` để caller retry có
+backoff.
+
+#### Cấu hình xác thực Google
+
+1. Tạo Google Cloud project, bật **Google Sheets API**, rồi tạo Service Account
+   và tải JSON key về máy chủ dưới tên ngoài repository.
+2. Mở JSON, lấy `client_email`, rồi chia sẻ spreadsheet
+   [ID đã cấu hình](https://docs.google.com/spreadsheets/d/1ih-uW88lfBq_e1d0meTgUvZtVWXX455aNl5nxbqNGD4/edit)
+   cho email đó với quyền **Editor**. Worker tự tạo tab `Matches` và hàng tiêu
+   đề (`matchId`, `bot1`, `bot2`, `winner`, `playedAt`) nếu chưa có.
+3. Sao chép `.env.example` thành `.env`, đặt `MATCH_INGEST_TOKEN` thành secret
+   ngẫu nhiên mạnh nếu dùng endpoint nhận dữ liệu từ bên ngoài, cập nhật
+   `GOOGLE_APPLICATION_CREDENTIALS` thành đường dẫn JSON trên host và cấu hình
+   `REDIS_URL`. Chỉ ghi tự động từ các trận trong game không cần token này.
+   `.env` và key JSON không được commit hoặc gửi cho client/bot.
+4. Chạy Redis có persistence (AOF/RDB), giới hạn truy cập mạng và đặt chính
+   sách không eviction cho queue; sau đó `npm start`. Thiếu token thì endpoint
+   bị tắt. Mọi server instance phải dùng cùng Redis.
+
+Để thử trên máy đơn chưa cài Redis, đặt `MATCH_RESULTS_QUEUE=memory` trong
+`.env`. Worker vẫn tự ghi Sheets, nhưng queue sẽ mất khi server dừng và không
+dùng chung được giữa nhiều instance. Chỉ dùng chế độ này để kiểm tra local;
+xóa biến hoặc đặt `MATCH_RESULTS_QUEUE=redis` khi chuyển sang triển khai thật.
+
+Worker chỉ cho phép một instance ghi tại một thời điểm qua Redis lock, tối đa
+500 hàng mỗi request, flush mỗi 3 giây và cách các lần append tối thiểu 1.2
+giây (tối đa khoảng 50 request/phút, thấp hơn quota Sheets phổ biến 60
+request/phút). Chỉnh qua các biến `MATCH_SHEETS_BATCH_SIZE`,
+`MATCH_SHEETS_FLUSH_INTERVAL_MS`, `MATCH_SHEETS_MIN_APPEND_INTERVAL_MS`,
+`MATCH_SHEETS_RANGE` và `MATCH_RESULTS_MAX_QUEUE`. Google Sheets không phù hợp
+làm kho dữ liệu thời gian thực cho 10.000 trận/giây: khi queue đầy, API trả
+`503`; dùng PostgreSQL/BigQuery làm nguồn dữ liệu chính, rồi xuất báo cáo sang
+Sheets theo batch. Redis persistence và backup vẫn cần thiết. Nếu timeout xảy
+ra sau khi Google đã append nhưng trước khi worker nhận phản hồi, retry có thể
+tạo dòng trùng; pipeline này là at-least-once, không cam kết exactly-once.
+
+#### Chạy thử tải có giới hạn
+
+Trên máy local/staging của bạn, sau khi Redis, credentials và server đã chạy:
+
+```powershell
+$env:MATCH_RESULTS_TEST_TOKEN = $env:MATCH_INGEST_TOKEN
+$env:MATCH_RESULTS_TEST_COUNT = "10000"
+$env:MATCH_RESULTS_TEST_CONCURRENCY = "25"
+npm run load:test
+```
+
+Script gửi số request hữu hạn, mặc định chỉ tới localhost, giới hạn concurrency
+tối đa 100 và retry `429`/`503` có backoff. Chỉ kiểm tra hệ thống bạn sở hữu;
+để nhắm staging từ xa phải đặt rõ `ALLOW_EXTERNAL_LOAD_TEST=true` và URL test.
+Tăng tải từng bước, theo dõi Redis queue depth, HTTP `503`, latency, RSS/CPU,
+Sheets API errors và quota. Dừng thử tải nếu queue tiếp tục tăng hoặc server
+thực tế bị ảnh hưởng.
+
+#### Triển khai nhiều instance
+
+Trên Linux, có thể dùng PM2 cluster cho API; Redis dùng chung đảm bảo worker
+không đồng thời append từ từng process:
+
+```bash
+npm install --global pm2
+pm2 start src/server.js --name boardgame-api -i max
+pm2 save
+pm2 startup
+```
+
+Đặt reverse proxy/load balancer với giới hạn body, TLS và rate limit theo token.
+Không public Redis hay Service Account key. Với tải vượt khả năng Sheets, ghi
+trận trước vào database/stream bền vững (PostgreSQL, Kafka hoặc Pub/Sub), sau
+đó chạy consumer xuất bản tổng hợp/batch sang Sheets; một spreadsheet cũng có
+giới hạn tổng số ô và không nên được xem như database.
 
 Hoặc chạy Minimax ở cả hai bên:
 
@@ -137,12 +309,30 @@ người thắng với kết quả đã lưu.
 
 ### Giải đấu bot
 
-Mở **🏆 Bot Tournament** từ sảnh để chọn 2–12 bot, chế độ bàn cờ và giới hạn
-lượt. Mỗi cặp bot đấu hai ván, đổi bên P1/P2 ở ván thứ hai. Thắng được 1 điểm,
-hòa 0.5 điểm. Bảng xếp hạng, tiến độ và replay được lưu trong
+Mở **🏆 Bot Tournament** từ sảnh để chọn 2–12 bot, chế độ bàn cờ, thể thức và
+giới hạn lượt. Thể thức **Đấu loại trực tiếp** tự tạo bracket theo lũy thừa của
+2 gần nhất; với 12 bot, 4 bot được bye ở vòng đầu, sau đó đấu tứ kết, bán kết
+và chung kết. Trận hòa được chạy tối đa 3 lượt phân định; bot thắng được đi
+tiếp và nhà vô địch hiển thị trên trang giải.
+
+Thể thức **Vòng tròn hai lượt** giữ nguyên cách cũ: mỗi cặp bot đấu hai ván,
+đổi bên P1/P2 ở ván thứ hai. Thắng được 1 điểm, hòa 0.5 điểm. Bảng xếp hạng,
+tiến độ và replay được lưu trong
 `matches/tournaments/`; replay cũng xuất hiện trong trình xem replay. Bot tải
 lên từ giao diện được lưu thành phiên bản bất biến trong `bots/submissions/`.
 Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi khởi động lại server.
+
+### Giải cộng đồng do admin tổ chức
+
+Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 12 suất. Người chơi
+đăng nhập rồi mở `/tournaments.html`, chọn một file Python và bấm **Đăng ký
+bot** trong giải cộng đồng. Mỗi tài khoản chỉ được đăng ký một bot trong mỗi
+giải; một submission cũng không thể được dùng bởi hai tài khoản. Admin có thể
+bắt đầu khi có từ 2 đến 12 người, hệ thống tự tạo bracket loại trực tiếp và
+hiển thị tiến độ, danh sách người chơi và nhà vô địch công khai.
+
+Thông tin giải cộng đồng được lưu tại `matches/tournaments/community-events.json`;
+file bot bất biến và metadata chủ sở hữu nằm trong `bots/submissions/`.
 
 Có thể tạo giải round-robin từ terminal với hai bot mẫu:
 

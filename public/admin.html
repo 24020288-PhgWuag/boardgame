@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTT V2 // Quản trị</title>
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong></a></header>
+    <section class="lobby-panel" style="margin:40px auto; max-width:900px;">
+      <p class="eyebrow">QUẢN TRỊ</p>
+      <h1>Người chơi</h1>
+      <p id="admin-message" class="message"></p>
+      <div id="admin-users"></div>
+      <hr style="margin:28px 0;border:0;border-top:1px solid var(--line)">
+      <h2>Tạo giải cộng đồng</h2>
+      <form id="community-create" style="display:grid;gap:10px;max-width:460px">
+        <input id="community-name" placeholder="Tên giải" maxlength="60" required>
+        <select id="community-mode"><option value="army">9v9 Đại chiến</option><option value="tactical">6v6 Chiến thuật</option><option value="classic">3v3 Nhanh</option></select>
+        <input id="community-turns" type="number" min="20" max="2000" value="300">
+        <button class="primary-button">Tạo giải đăng ký</button>
+      </form>
+      <p id="community-message" class="message"></p>
+      <div id="community-events"></div>
+    </section>
+  </main>
+  <script>
+    fetch('/api/admin/users').then(async response => {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không có quyền.');
+      document.getElementById('admin-users').innerHTML = data.users.map(user =>
+        `<div style="display:grid;grid-template-columns:1fr repeat(4,auto);gap:18px;padding:12px;border-bottom:1px solid var(--line)">
+          <strong>${user.username}</strong><span>${user.rank}</span><span>${user.elo} ELO</span><span>${user.wins}/${user.games} thắng</span><small>${user.createdAt}</small>
+        </div>`).join('');
+    }).catch(error => document.getElementById('admin-message').textContent = error.message);
+    async function loadCommunity() {
+      const response = await fetch('/api/community-tournaments');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
+      document.getElementById('community-events').innerHTML = data.tournaments.map(event => `
+        <div style="border:1px solid var(--line);padding:14px;margin-top:12px;border-radius:8px">
+          <strong>${event.name}</strong> · ${event.status} · ${event.players.length}/12 người
+          ${event.status === 'registration' ? `<button data-start="${event.id}" class="secondary-button" style="float:right">Bắt đầu</button>` : ''}
+          <div>${event.players.map(player => `${player.username} — ${player.botName}`).join('<br>') || 'Chưa có người đăng ký'}</div>
+          ${event.champion ? `<strong>🏆 ${event.champion}</strong>` : ''}
+        </div>`).join('');
+      document.querySelectorAll('[data-start]').forEach(button => button.onclick = async () => {
+        const result = await fetch(`/api/community-tournaments/${button.dataset.start}/start`, { method: 'POST' });
+        const body = await result.json();
+        document.getElementById('community-message').textContent = body.error || 'Đã bắt đầu giải.';
+        loadCommunity();
+      });
+    }
+    document.getElementById('community-create').onsubmit = async event => {
+      event.preventDefault();
+      const response = await fetch('/api/community-tournaments', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        name: document.getElementById('community-name').value,
+        mode: document.getElementById('community-mode').value,
+        maxTurns: Number(document.getElementById('community-turns').value)
+      })});
+      const data = await response.json();
+      document.getElementById('community-message').textContent = data.error || 'Đã tạo giải.';
+      if (response.ok) loadCommunity();
+    };
+    loadCommunity().catch(error => document.getElementById('community-message').textContent = error.message);
+  </script>
+</body>
+</html>

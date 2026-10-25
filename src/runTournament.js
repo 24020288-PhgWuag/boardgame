@@ -8,7 +8,8 @@ const maxTurns = Number(process.argv[3] || 300);
 const botIds = process.argv.slice(4);
 const knownBots = {
   random: { id: 'random', name: 'Random Bot', script: 'bots/random_bot.py' },
-  minimax: { id: 'minimax', name: 'Minimax Bot', script: 'bots/minimax_bot.py' }
+  minimax: { id: 'minimax', name: 'Minimax Bot', script: 'bots/minimax_bot.py' },
+  guardian: { id: 'guardian', name: 'Guardian Bot', script: 'bots/guardian_bot.py' }
 };
 
 if (!['classic', 'tactical', 'army'].includes(mode)) throw new Error('Mode must be classic, tactical, or army.');
