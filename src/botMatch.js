@@ -8,6 +8,8 @@ const p2Script = process.argv[5] || process.env.BOT_P2_SCRIPT || 'bots/random_bo
 const replayPath = process.argv[6] || process.env.REPLAY_FILE ||
   path.join('matches', `bot-match-${Date.now()}.json`);
 const projectRoot = path.join(__dirname, '..');
+const bundledScripts = ['bots/random_bot.py', 'bots/minimax_bot.py', 'bots/guardian_bot.py']
+  .map(script => path.resolve(projectRoot, script));
 
 async function playMatch() {
   const result = await runMatch({
@@ -15,8 +17,18 @@ async function playMatch() {
     maxTurns,
     matchId: 'headless-bot-match',
     cwd: projectRoot,
-    botP1: { id: 'bot-p1', name: 'Bot P1', script: p1Script },
-    botP2: { id: 'bot-p2', name: 'Bot P2', script: p2Script },
+    botP1: {
+      id: 'bot-p1',
+      name: 'Bot P1',
+      script: p1Script,
+      untrusted: !bundledScripts.includes(path.resolve(projectRoot, p1Script))
+    },
+    botP2: {
+      id: 'bot-p2',
+      name: 'Bot P2',
+      script: p2Script,
+      untrusted: !bundledScripts.includes(path.resolve(projectRoot, p2Script))
+    },
     replayPath: path.join(projectRoot, replayPath),
     onBotError: (player, error) => console.error(`${player} bot: ${error.message}`)
   });

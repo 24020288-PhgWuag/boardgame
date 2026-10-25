@@ -5,14 +5,19 @@
   "description": "OTT V2 multiplayer rock-paper-scissors board game",
   "main": "src/server.js",
   "scripts": {
+    "test": "node --test",
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "bot:match": "node src/botMatch.js",
     "bot:tournament": "node src/runTournament.js",
-    "replay": "node src/replayMatch.js"
+    "replay": "node src/replayMatch.js",
+    "load:test": "node tools/simulate-match-results.js"
   },
   "dependencies": {
+    "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "googleapis": "^188.0.0",
+    "ioredis": "^5.6.1",
     "ws": "^8.18.0"
   }
 }

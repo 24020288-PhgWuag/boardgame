@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -10,12 +12,23 @@ const { applyMove, createBotSnapshot } = require('./gameState');
 const { createReplay, saveReplay } = require('./replay');
 const { runMatch } = require('./matchRunner');
 const TournamentManager = require('./tournamentManager');
+const { AuthStore } = require('./authStore');
+const CommunityTournamentManager = require('./communityTournamentManager');
+const matchResultSheets = require('./matchResultSheets');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+app.use('/api/match-results', matchResultSheets.router);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 const rooms = new RoomManager();
+const auth = new AuthStore(
+  path.join(__dirname, '..', 'data', 'boardgame.sqlite'),
+  path.join(__dirname, '..', 'data', 'users.json')
+);
+const requestWindows = new Map();
+const matchmakingQueue = [];
+const TURN_LIMIT_MS = 30 * 1000;
 const BOT_MATCH_SPEEDS = {
   slow: 1500,
   medium: 900,
@@ -23,13 +36,40 @@ const BOT_MATCH_SPEEDS = {
 };
 const BOT_MATCH_SCRIPTS = {
   random: 'bots/random_bot.py',
-  minimax: 'bots/minimax_bot.py'
+  minimax: 'bots/minimax_bot.py',
+  guardian: 'bots/guardian_bot.py'
 };
 const UPLOAD_DIR = path.join(__dirname, '..', 'bots', 'uploads');
 const SUBMISSION_DIR = path.join(__dirname, '..', 'bots', 'submissions');
 const TOURNAMENT_DIR = path.join(__dirname, '..', 'matches', 'tournaments');
+const pendingMatchResults = new Map();
+const MAX_PENDING_MATCH_RESULTS = 100000;
+let matchResultPump;
+let matchResultPumpActive = false;
+let reportedMissingMatchResultConfig = false;
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(SUBMISSION_DIR, { recursive: true });
+
+function parseCookies(header = '') {
+  return header.split(';').reduce((cookies, part) => {
+    const separator = part.indexOf('=');
+    if (separator < 0) return cookies;
+    cookies[part.slice(0, separator).trim()] = decodeURIComponent(part.slice(separator + 1).trim());
+    return cookies;
+  }, {});
+}
+
+function getRequestUser(req) {
+  return auth.getSession(parseCookies(req.headers.cookie).ott_session);
+}
+
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', `ott_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800`);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'ott_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0');
+}
 
 function getUploadedBot(botId) {
   if (typeof botId !== 'string' || !botId.startsWith('uploaded:')) return null;
@@ -43,6 +83,7 @@ function getBotDefinition(botId) {
   let script = null;
   let name = null;
   let sha256 = null;
+  let untrusted = false;
   if (Object.prototype.hasOwnProperty.call(BOT_MATCH_SCRIPTS, botId)) {
     script = path.join(__dirname, '..', BOT_MATCH_SCRIPTS[botId]);
     name = getBotDisplayName(botId);
@@ -54,20 +95,36 @@ function getBotDefinition(botId) {
     const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     name = metadata.name;
     sha256 = metadata.sha256;
+    untrusted = true;
   } else {
     script = getUploadedBot(botId);
     if (!script) return null;
     name = getBotDisplayName(botId);
+    untrusted = true;
   }
   if (!fs.existsSync(script)) return null;
   sha256 ||= crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
-  return { id: botId, name, script, sha256 };
+  return { id: botId, name, script, sha256, untrusted };
 }
 
 const tournaments = new TournamentManager(TOURNAMENT_DIR, {
   resolveBot: getBotDefinition,
-  runMatch
+  runMatch,
+  onMatchComplete: recordMatchResult
 });
+const communityTournaments = new CommunityTournamentManager(
+  path.join(TOURNAMENT_DIR, 'community-events.json'),
+  {
+    startTournament: event => tournaments.create({
+      name: event.name,
+      botIds: event.players.map(player => player.botId),
+      mode: event.mode,
+      maxTurns: event.maxTurns,
+      format: 'single-elimination'
+    })
+  }
+);
+communityTournaments.startTournament.read = id => tournaments.read(id);
 
 function getBotDisplayName(botId) {
   if (botId === 'minimax') return 'Minimax Bot';
@@ -105,11 +162,111 @@ function saveBotMatchReplay(room) {
   const filename = `${replayNamePart(room.botMatch.botP1Name)}-${replayNamePart(room.botMatch.botP2Name)}-${replayTimestamp()}.json`;
   room.botMatch.replayFile = saveReplay(replay, path.join(__dirname, '..', 'matches', filename));
   room.botMatch.replaySaved = true;
+  queueRoomMatchResult(room);
   console.log(`Saved bot match replay: ${room.botMatch.replayFile}`);
 }
 
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+app.get('/api/auth/me', (req, res) => {
+  res.json({ user: getRequestUser(req) });
+});
+
+app.get('/api/leaderboard', (req, res) => {
+  res.json({ leaderboard: auth.getLeaderboard() });
+});
+
+app.get('/api/profile/:id', (req, res) => {
+  const profile = auth.getProfile(req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Không tìm thấy người chơi.' });
+  res.json({ profile });
+});
+
+function requireAdmin(req, res, next) {
+  const user = getRequestUser(req);
+  if (!user || !auth.isAdmin(user.id)) return res.status(403).json({ error: 'Bạn không có quyền quản trị.' });
+  req.user = user;
+  next();
+}
+
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+  res.json({ users: auth.listUsers() });
+});
+
+app.get('/api/community-tournaments', (req, res) => {
+  communityTournaments.sync();
+  res.json({ tournaments: communityTournaments.list() });
+});
+
+app.post('/api/community-tournaments', requireAdmin, (req, res) => {
+  const mode = req.body?.mode;
+  const maxTurns = Number(req.body?.maxTurns || 300);
+  if (!['classic', 'tactical', 'army'].includes(mode)) {
+    return res.status(400).json({ error: 'Hãy chọn chế độ chơi hợp lệ.' });
+  }
+  if (!Number.isInteger(maxTurns) || maxTurns < 20 || maxTurns > 2000) {
+    return res.status(400).json({ error: 'Giới hạn lượt phải từ 20 đến 2000.' });
+  }
+  res.status(201).json({ tournament: communityTournaments.create({ name: req.body?.name, mode, maxTurns }) });
+});
+
+app.post('/api/community-tournaments/:id/register', (req, res) => {
+  const user = getRequestUser(req);
+  if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để đăng ký bot.' });
+  const filename = String(req.body?.filename || '');
+  const source = req.body?.source;
+  const name = String(req.body?.name || filename.replace(/\.py$/i, '')).trim().slice(0, 60) || 'Community Bot';
+  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
+    return res.status(400).json({ error: 'Tên file bot không hợp lệ.' });
+  }
+  if (typeof source !== 'string' || !source.trim()) return res.status(400).json({ error: 'File bot không được để trống.' });
+  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
+  const botId = crypto.randomUUID();
+  const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.py`), source, { encoding: 'utf8', flag: 'wx' });
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.json`), `${JSON.stringify({
+    id: botId, name, originalFilename: filename, sha256, ownerId: user.id, ownerName: user.username,
+    createdAt: new Date().toISOString()
+  }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  const result = communityTournaments.register(req.params.id, { userId: user.id, username: user.username, botId: `submission:${botId}`, botName: name });
+  if (result.error) {
+    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.py`), { force: true });
+    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.json`), { force: true });
+    return res.status(400).json({ error: result.error });
+  }
+  res.status(201).json({ tournament: result.event });
+});
+
+app.post('/api/community-tournaments/:id/start', requireAdmin, (req, res) => {
+  try {
+    const result = communityTournaments.start(req.params.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json({ tournament: result.event });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/register', (req, res) => {
+  const result = auth.createUser(String(req.body?.username || ''), req.body?.password);
+  if (result.error) return res.status(400).json({ error: result.error });
+  setSessionCookie(res, auth.createSession(result.user));
+  res.status(201).json({ user: result.user });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const user = auth.authenticate(String(req.body?.username || ''), req.body?.password);
+  if (!user) return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không đúng.' });
+  setSessionCookie(res, auth.createSession(user));
+  res.json({ user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  auth.destroySession(parseCookies(req.headers.cookie).ott_session);
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
 
 // Specific route aliases for playfull.html / playful.html
 app.get('/playfull.html', (req, res) => {
@@ -186,7 +343,8 @@ app.post('/api/tournaments', (req, res) => {
       name: req.body?.name,
       botIds: req.body?.botIds,
       mode,
-      maxTurns
+      maxTurns,
+      format: req.body?.format === 'single-elimination' ? 'single-elimination' : 'round-robin-two-legs'
     });
     const { bots, ...publicTournament } = tournament;
     res.status(201).json({ tournament: {
@@ -248,6 +406,11 @@ function broadcast(room, type, payload = {}) {
   }
 }
 
+function broadcastRooms() {
+  const payload = { rooms: rooms.getPublicRooms() };
+  for (const socket of wss.clients) send(socket, 'rooms_list', payload);
+}
+
 function broadcastState(room, outcome, from, to, player) {
   broadcast(room, 'state', {
     state: room.state,
@@ -255,8 +418,125 @@ function broadcastState(room, outcome, from, to, player) {
     capturedPiece: outcome.capturedPiece,
     from,
     to,
-    lastPlayer: player
+    lastPlayer: player,
+    turnDeadline: room.turnDeadline || null
   });
+}
+
+function recordMatchResult(result) {
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    if (!reportedMissingMatchResultConfig) {
+      reportedMissingMatchResultConfig = true;
+      console.error('Match result reporting is disabled: configure GOOGLE_APPLICATION_CREDENTIALS to enable it.');
+    }
+    return false;
+  }
+  const record = matchResultSheets.validateRecord(result);
+  if (!record) {
+    console.error('Refusing to queue an invalid completed match result.');
+    return false;
+  }
+  if (!pendingMatchResults.has(record.matchId) &&
+      pendingMatchResults.size >= MAX_PENDING_MATCH_RESULTS) {
+    console.error(`Completed match result queue is full (${MAX_PENDING_MATCH_RESULTS}); result ${record.matchId} was not queued.`);
+    return false;
+  }
+
+  pendingMatchResults.set(record.matchId, record);
+  if (!matchResultPump) {
+    matchResultPump = setInterval(pumpMatchResults, 1000);
+    matchResultPump.unref();
+  }
+  if (pendingMatchResults.size >= 100) void pumpMatchResults();
+  return true;
+}
+
+async function pumpMatchResults() {
+  if (matchResultPumpActive || !pendingMatchResults.size) return;
+  matchResultPumpActive = true;
+  const batch = [...pendingMatchResults.entries()].slice(0, 100);
+  try {
+    await matchResultSheets.enqueueMatchResults(batch.map(([, record]) => record));
+    for (const [matchId, record] of batch) {
+      if (pendingMatchResults.get(matchId) === record) pendingMatchResults.delete(matchId);
+    }
+  } catch (error) {
+    console.error(`Could not queue completed match results; will retry: ${error.message}`);
+  } finally {
+    matchResultPumpActive = false;
+    if (!pendingMatchResults.size && matchResultPump) {
+      clearInterval(matchResultPump);
+      matchResultPump = null;
+    }
+  }
+}
+
+function queueRoomMatchResult(room) {
+  if (!room?.state?.winner || room.resultQueued) return;
+  const isBotMatch = Boolean(room.botMatch);
+  const bot1 = isBotMatch
+    ? room.botMatch.botP1Name
+    : room.state.players.p1 || 'P1';
+  const bot2 = isBotMatch
+    ? room.botMatch.botP2Name
+    : room.state.players.p2 || 'P2';
+  recordMatchResult({
+    matchId: room.matchResultId || crypto.randomUUID(),
+    bot1: String(bot1).slice(0, 100),
+    bot2: String(bot2).slice(0, 100),
+    winner: room.state.winner === 'p1' ? 'bot1' : 'bot2',
+    playedAt: new Date().toISOString()
+  });
+  room.resultQueued = true;
+}
+
+function settleOnlineRating(room) {
+  if (!room || room.ratingUpdated || room.bot || room.botMatch || !room.state.winner) return null;
+  const users = {};
+  for (const [socket, role] of room.sockets.entries()) {
+    if ((role === 'p1' || role === 'p2') && socket.user) users[role] = socket.user;
+  }
+  if (!users.p1 || !users.p2) return null;
+
+  const winner = users[room.state.winner];
+  const loser = users[room.state.winner === 'p1' ? 'p2' : 'p1'];
+  const result = auth.recordMatch(winner.id, loser.id, room.mode, room.state.winReason);
+  if (!result) return null;
+  room.ratingUpdated = true;
+  broadcast(room, 'rating-updated', {
+    winner: result.winner,
+    loser: result.loser,
+    change: result.change
+  });
+  return result;
+}
+
+function setTurnDeadline(room) {
+  clearTimeout(room.turnTimer);
+  if (!room || room.state.winner || room.bot || room.botMatch || room.sockets.size < 2) return;
+  room.turnDeadline = Date.now() + TURN_LIMIT_MS;
+  room.turnTimer = setTimeout(() => {
+    if (!room.state.winner && room.turnDeadline <= Date.now()) {
+      room.state.winner = room.state.turn === 'p1' ? 'p2' : 'p1';
+      room.state.winReason = 'Đối thủ hết thời gian lượt đi.';
+      room.state.turn = room.state.winner;
+      broadcastState(room, { result: 'timeout' }, null, null, null);
+      settleOnlineRating(room);
+      queueRoomMatchResult(room);
+    }
+  }, TURN_LIMIT_MS + 100);
+}
+
+function rateLimitSocket(socket, type) {
+  const now = Date.now();
+  const key = `${socket.user?.id || socket._socket?.remoteAddress || 'anonymous'}:${type}`;
+  const previous = requestWindows.get(key) || [];
+  const recent = previous.filter(timestamp => now - timestamp < 1000);
+  const limit = type === 'move' ? 8 : 30;
+  if (recent.length >= limit) return false;
+  recent.push(now);
+  requestWindows.set(key, recent);
+  return true;
 }
 
 function forfeitBot(room, reason) {
@@ -265,6 +545,7 @@ function forfeitBot(room, reason) {
   room.state.winner = 'p1';
   room.state.winReason = `Bot đã bị xử thua: ${reason}`;
   room.state.turn = 'p1';
+  queueRoomMatchResult(room);
   broadcast(room, 'state', {
     state: room.state,
     result: 'forfeit',
@@ -279,6 +560,7 @@ function forfeitBotMatch(room, player, reason) {
   room.state.winner = player === 'p1' ? 'p2' : 'p1';
   room.state.winReason = `${player === 'p1' ? 'Bot P1' : 'Bot P2'} bị xử thua: ${reason}`;
   room.state.turn = room.state.winner;
+  queueRoomMatchResult(room);
   broadcast(room, 'state', {
     state: room.state,
     result: 'forfeit',
@@ -315,6 +597,7 @@ async function requestBotTurn(room) {
     }
 
     broadcastState(room, outcome, from, to, 'p2');
+    if (room.state.winner) queueRoomMatchResult(room);
   } catch (error) {
     console.error(`Bot failure in room ${room.code}:`, error.message);
     forfeitBot(room, error.message);
@@ -367,8 +650,10 @@ function scheduleBotMatchTurn(room) {
   }, room.botMatch.delayMs);
 }
 
-wss.on('connection', (socket) => {
+wss.on('connection', (socket, req) => {
   socket.isAlive = true;
+  socket.user = getRequestUser(req);
+  socket.rateLimited = false;
 
   socket.on('message', (raw) => {
     let message;
@@ -376,6 +661,9 @@ wss.on('connection', (socket) => {
       message = JSON.parse(raw);
     } catch {
       return send(socket, 'error', { message: 'Gói tin không hợp lệ.' });
+    }
+    if (!rateLimitSocket(socket, message.type || 'unknown')) {
+      return send(socket, 'error', { message: 'Bạn gửi yêu cầu quá nhanh. Hãy thử lại sau.' });
     }
 
     // Ping / Pong for latency
@@ -388,11 +676,41 @@ wss.on('connection', (socket) => {
       return send(socket, 'rooms_list', { rooms: rooms.getPublicRooms() });
     }
 
+    if (message.type === 'quick_match') {
+      if (!socket.user) return send(socket, 'auth_required', { message: 'Bạn cần đăng nhập để tìm trận.' });
+      const existing = matchmakingQueue.find(item => item.socket !== socket && Math.abs(item.elo - socket.user.elo) <= 250);
+      if (existing) {
+        matchmakingQueue.splice(matchmakingQueue.indexOf(existing), 1);
+        const room = rooms.createRoom(message.mode || 'army');
+        const first = rooms.joinRoom(room.code, existing.socket);
+        const second = rooms.joinRoom(room.code, socket);
+        room.state.players.p1 = existing.socket.user.username;
+        room.state.players.p2 = socket.user.username;
+        existing.socket.roomCode = room.code;
+        socket.roomCode = room.code;
+        send(existing.socket, 'joined', { code: room.code, player: first.player, state: room.state, mode: room.mode });
+        send(socket, 'joined', { code: room.code, player: second.player, state: room.state, mode: room.mode });
+        setTurnDeadline(room);
+        return;
+      }
+      matchmakingQueue.push({ socket, elo: socket.user.elo, mode: message.mode || 'army' });
+      return send(socket, 'matchmaking', { waiting: true, message: 'Đang tìm đối thủ có ELO gần bạn...' });
+    }
+
+    if (['create', 'join', 'create_bot_match'].includes(message.type) && !socket.user) {
+      return send(socket, 'auth_required', { message: 'Bạn cần đăng nhập để chơi online.' });
+    }
+
     // Create room
     if (message.type === 'create') {
       const mode = message.mode || 'army';
-      const room = rooms.createRoom(mode);
+      const password = typeof message.password === 'string' ? message.password.trim() : '';
+      if (password.length > 64) {
+        return send(socket, 'error', { message: 'Mật khẩu phòng tối đa 64 ký tự.' });
+      }
+      const room = rooms.createRoom(mode, password);
       const joined = rooms.joinRoom(room.code, socket);
+      room.state.players[joined.player] = socket.user.username;
       socket.roomCode = room.code;
       if (message.bot === true) {
         room.bot = new BotProcess({
@@ -407,8 +725,11 @@ wss.on('connection', (socket) => {
         player: joined.player,
         state: room.state,
         mode: room.mode,
-        bot: Boolean(room.bot)
+        bot: Boolean(room.bot),
+        turnDeadline: room.turnDeadline || null
       });
+      broadcastRooms();
+      setTurnDeadline(room);
       return;
     }
 
@@ -438,11 +759,13 @@ wss.on('connection', (socket) => {
         p1: new BotProcess({
           cwd: path.join(__dirname, '..'),
           script: botP1Definition.script,
+          sandboxed: botP1Definition.untrusted,
           onError: error => console.error(`Bot P1 error in room ${room.code}:`, error.message)
         }),
         p2: new BotProcess({
           cwd: path.join(__dirname, '..'),
           script: botP2Definition.script,
+          sandboxed: botP2Definition.untrusted,
           onError: error => console.error(`Bot P2 error in room ${room.code}:`, error.message)
         })
       };
@@ -483,22 +806,34 @@ wss.on('connection', (socket) => {
     // Join room
     if (message.type === 'join') {
       const code = String(message.code || '').trim().toUpperCase();
+      const room = rooms.getRoom(code);
+      if (!room) return send(socket, 'error', { message: 'Không tìm thấy phòng đấu với mã này.' });
+      if (!rooms.verifyRoomPassword(room, message.password)) {
+        return send(socket, 'error', { message: 'Mật khẩu phòng không đúng.' });
+      }
       const joined = rooms.joinRoom(code, socket, message.role);
       if (joined.error) {
         return send(socket, 'error', { message: joined.error });
       }
       socket.roomCode = joined.room.code;
+      if (joined.player === 'p1' || joined.player === 'p2') {
+        joined.room.state.players[joined.player] = socket.user.username;
+      }
+      setTurnDeadline(joined.room);
       send(socket, 'joined', {
         code: joined.room.code,
         player: joined.player,
         state: joined.room.state,
-        mode: joined.room.mode
+        mode: joined.room.mode,
+        turnDeadline: joined.room.turnDeadline || null
       });
       broadcast(joined.room, 'room-update', {
         state: joined.room.state,
         event: 'player_joined',
-        player: joined.player
+        player: joined.player,
+        turnDeadline: joined.room.turnDeadline || null
       });
+      broadcastRooms();
       return;
     }
 
@@ -511,6 +846,15 @@ wss.on('connection', (socket) => {
       }
       if (player === 'spectator') {
         return send(socket, 'error', { message: 'Khán giả không thể thực hiện nước đi.' });
+      }
+      if (room.turnDeadline && Date.now() > room.turnDeadline) {
+        room.state.winner = room.state.turn === 'p1' ? 'p2' : 'p1';
+        room.state.winReason = 'Đối thủ hết thời gian lượt đi.';
+        room.state.turn = room.state.winner;
+        broadcastState(room, { result: 'timeout' }, null, null, null);
+        settleOnlineRating(room);
+        queueRoomMatchResult(room);
+        return;
       }
 
       const outcome = applyMove(
@@ -526,6 +870,11 @@ wss.on('connection', (socket) => {
       const from = message.from || message.action?.from;
       const to = message.to || message.action?.to;
       broadcastState(room, outcome, from, to, player);
+      setTurnDeadline(room);
+      if (room.state.winner) {
+        settleOnlineRating(room);
+        queueRoomMatchResult(room);
+      }
       requestBotTurn(room);
       return;
     }
@@ -537,6 +886,8 @@ wss.on('connection', (socket) => {
       if (!room || !player) return;
 
       rooms.resetRoom(room.code, message.mode);
+      room.ratingUpdated = false;
+      setTurnDeadline(room);
       if (room.bot) {
         room.state.players.p2 = 'p2';
       }
@@ -574,6 +925,8 @@ wss.on('connection', (socket) => {
   });
 
   socket.on('close', () => {
+    const queued = matchmakingQueue.findIndex(item => item.socket === socket);
+    if (queued >= 0) matchmakingQueue.splice(queued, 1);
     const result = rooms.remove(socket);
     if (result && !result.empty && result.room) {
       broadcast(result.room, 'room-update', {
@@ -583,6 +936,7 @@ wss.on('connection', (socket) => {
         message: `${result.disconnectedRole === 'p1' ? 'Đội Đỏ (P1)' : 'Đội Xanh (P2)'} đã thoát phòng.`
       });
     }
+    broadcastRooms();
   });
 });
 
@@ -591,4 +945,22 @@ server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);
   tournaments.resume();
+  matchResultSheets.startWorker();
 });
+
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const forcedExit = setTimeout(() => process.exit(1), 10000);
+  forcedExit.unref();
+  wss.clients.forEach(socket => socket.close(1001, 'Server shutting down'));
+  server.close(async () => {
+    await matchResultSheets.stopWorker();
+    clearTimeout(forcedExit);
+    process.exit(0);
+  });
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

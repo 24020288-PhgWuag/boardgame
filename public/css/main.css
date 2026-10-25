@@ -258,6 +258,127 @@ button:active {
   line-height: 1.45;
 }
 
+.leaderboard-panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 18px;
+}
+
+.room-password-label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-password-label input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  background: var(--card-bg);
+}
+
+.leaderboard-panel h3 {
+  margin: 5px 0 0;
+  font-size: 17px;
+}
+
+.leaderboard-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.leaderboard-row {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.leaderboard-row.is-current-user {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgba(42, 157, 143, 0.12);
+}
+
+.leaderboard-rank {
+  color: var(--muted);
+  font: 600 12px 'DM Mono', monospace;
+  text-align: center;
+}
+
+.leaderboard-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaderboard-name small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.leaderboard-elo {
+  color: var(--red);
+  font: 600 14px 'DM Mono', monospace;
+}
+
+.leaderboard-empty {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.auth-profile-link {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.profile-summary {
+  background: #f1eee5;
+  border-radius: 8px;
+  padding: 14px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.profile-history {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  max-height: 280px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.profile-match {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.profile-match.win strong { color: var(--green); }
+.profile-match.loss strong { color: var(--red); }
+.profile-match span { color: var(--muted); }
+
 /* Lobby Right Panel */
 .lobby-panel-container {
   display: flex;

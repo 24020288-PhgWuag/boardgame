@@ -21,6 +21,11 @@
         </div>
       </a>
       <div class="topbar-actions">
+        <div id="auth-user" class="auth-user hidden">
+          <button id="profile-btn" class="auth-profile-link" type="button"></button>
+          <button id="logout-btn" class="nav-btn" type="button">Đăng xuất</button>
+        </div>
+        <button id="auth-btn" class="nav-btn" type="button">Đăng nhập</button>
         <button id="rules-btn" class="nav-btn" type="button" title="Xem luật chơi">
           <span>📖</span> Luật chơi
         </button>
@@ -80,6 +85,11 @@
             <span>Tạo phòng đấu mới</span>
             <span>↗</span>
           </button>
+          <button id="quick-match-btn" class="secondary-button" type="button">⚡ Tìm trận nhanh theo ELO</button>
+          <label class="room-password-label">
+            Mật khẩu phòng (không bắt buộc)
+            <input id="room-password" type="password" maxlength="64" placeholder="Để trống nếu muốn phòng công khai" autocomplete="new-password">
+          </label>
 
           <div class="divider"><span>hoặc nhập mã phòng</span></div>
 
@@ -122,6 +132,19 @@
           </div>
           <div id="open-rooms-list" class="rooms-list">
             <!-- Dynamic open rooms -->
+          </div>
+        </div>
+
+        <div class="leaderboard-panel">
+          <div class="open-rooms-header">
+            <div>
+              <div class="panel-kicker">XẾP HẠNG NGƯỜI CHƠI</div>
+              <h3>Đấu trường ELO</h3>
+            </div>
+            <button id="refresh-leaderboard-btn" class="nav-btn" type="button" style="padding:4px 8px; font-size:11px;">Làm mới</button>
+          </div>
+          <div id="leaderboard-list" class="leaderboard-list">
+            <p class="leaderboard-empty">Đang tải bảng xếp hạng...</p>
           </div>
         </div>
       </div>
@@ -281,6 +304,36 @@
   </main>
 
   <!-- 3. MODALS -->
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-card auth-modal-card">
+      <button id="close-auth-btn" class="modal-close-btn" type="button">✕</button>
+      <p class="eyebrow">TÀI KHOẢN NGƯỜI CHƠI</p>
+      <h2 id="auth-title">Đăng nhập</h2>
+      <p class="modal-reason">Đăng nhập để tạo phòng và lưu danh tính trong các trận đấu online.</p>
+      <form id="auth-form" class="auth-form">
+        <label>Tên tài khoản
+          <input id="auth-username-input" required minlength="3" maxlength="24" autocomplete="username">
+        </label>
+        <label>Mật khẩu
+          <input id="auth-password-input" required minlength="8" maxlength="128" type="password" autocomplete="current-password">
+        </label>
+        <p id="auth-message" class="message"></p>
+        <button id="auth-submit" class="primary-button" type="submit">Đăng nhập</button>
+      </form>
+      <button id="auth-switch" class="auth-switch" type="button">Chưa có tài khoản? Đăng ký</button>
+    </div>
+
+    <div id="profile-modal" class="modal hidden">
+      <div class="modal-card profile-modal-card">
+        <button id="close-profile-btn" class="modal-close-btn" type="button">✕</button>
+        <p class="eyebrow">HỒ SƠ NGƯỜI CHƠI</p>
+        <h2 id="profile-name">Hồ sơ</h2>
+        <div id="profile-summary" class="profile-summary"></div>
+        <div id="profile-history" class="profile-history"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="bot-match-modal" class="modal hidden">
     <div class="modal-card">
       <p class="eyebrow">BOT ĐẤU BOT</p>
@@ -408,6 +461,7 @@
   <script src="/js/graphics/renderer.js"></script>
   <script src="/js/boardView.js"></script>
   <script src="/js/clientNetwork.js"></script>
+  <script src="/js/auth.js"></script>
 
   <!-- Main Game Client Script -->
   <script>
@@ -429,6 +483,7 @@
     let botMatchOptions = null;
     let gameTimer = null;
     let timeLeft = 30;
+    let authoritativeTurnDeadline = null;
 
     // Helper message display
     window.showMessage = function(text, type = 'info') {
@@ -509,7 +564,8 @@
         stopTurnTimer();
         setTimeout(() => showResultModal(state.winner, state.winReason), 600);
       } else {
-        resetTurnTimer();
+        if (!isLocalGame && authoritativeTurnDeadline) updateTurnTimer(authoritativeTurnDeadline);
+        else resetTurnTimer();
         if ((!isLocalGame && state.turn === player) || (isLocalGame && state.turn === 'p1')) {
           sound.playTurn();
         }
@@ -536,11 +592,15 @@
 
       // Player cards connection state
       if (isLocalGame) {
+        $('p1-name').textContent = 'Đội Đỏ';
+        $('p2-name').textContent = isBotGame ? 'Bot AI' : 'Đội Xanh';
         $('p1-state').textContent = 'Đang chơi tại máy';
         $('p2-state').textContent = isBotGame ? 'Máy (Bot AI)' : 'Đang chơi tại máy';
       } else {
-        $('p1-state').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Python Bot' : (state.players.p1 ? 'Đã sẵn sàng' : 'Chờ kết nối...');
-        $('p2-state').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Python Bot' : (isBotGame ? 'Máy (Python Bot)' : (state.players.p2 ? 'Đã sẵn sàng' : 'Chờ kết nối...'));
+        $('p1-name').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Bot P1' : state.players.p1 || 'Đội Đỏ';
+        $('p2-name').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Bot P2' : (isBotGame ? 'Bot AI' : state.players.p2 || 'Đội Xanh');
+          $('p1-state').textContent = isBotMatch ? botMatchOptions?.botP1Name || 'Python Bot' : (state.players.p1 ? state.players.p1 : 'Chờ kết nối...');
+          $('p2-state').textContent = isBotMatch ? botMatchOptions?.botP2Name || 'Python Bot' : (isBotGame ? 'Máy (Python Bot)' : (state.players.p2 ? state.players.p2 : 'Chờ kết nối...'));
       }
 
       // Role badges
@@ -661,7 +721,20 @@
       $('game').classList.remove('hidden');
       $('room-label').textContent = data.code || 'LOCAL';
       $('room-code-display').textContent = data.code || 'LOCAL';
+      if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
       onStateUpdated('init');
+    }
+
+    function updateTurnTimer(deadline) {
+      authoritativeTurnDeadline = deadline;
+      stopTurnTimer();
+      const tick = () => {
+        timeLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        $('turn-timer-badge').textContent = `${timeLeft}s`;
+        if (timeLeft <= 0) stopTurnTimer();
+      };
+      tick();
+      gameTimer = setInterval(tick, 250);
     }
 
     // Setup Local Game
@@ -829,6 +902,10 @@
         $('connection').classList.add('online');
         if (callback) callback();
       });
+      network.on('auth_required', data => {
+        showToast(data.message || 'Bạn cần đăng nhập để chơi online.', 'warning');
+        $('auth-modal').classList.remove('hidden');
+      });
 
       network.on('latency', (ms) => {
         $('connection').textContent = `ONLINE (${ms}ms)`;
@@ -845,14 +922,20 @@
 
       network.on('room-update', (data) => {
         state = data.state;
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
         onStateUpdated('update');
         if (data.message) showToast(data.message, 'info');
       });
 
       network.on('state', (data) => {
         state = data.state;
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
         onStateUpdated(data.result, data.capturedPiece, data.from, data.to);
       });
+
+      network.on('matchmaking', data => showToast(data.message, 'info'));
 
       network.on('bot-speed-updated', (data) => {
         $('live-bot-speed').value = data.speed;
@@ -875,6 +958,16 @@
         renderPublicRooms(data.rooms);
       });
 
+      network.on('rating-updated', (data) => {
+        const user = Auth.getUser();
+        if (user && (user.id === data.winner.id || user.id === data.loser.id)) {
+          const updated = user.id === data.winner.id ? data.winner : data.loser;
+          Auth.setUser(updated);
+          showToast(`ELO mới: ${updated.elo} (${user.id === data.winner.id ? '+' : '-'}${data.change})`, 'info');
+        }
+        loadLeaderboard();
+      });
+
       network.on('error', (data) => {
         $('lobby-message').textContent = data.message;
         showToast(data.message, 'error');
@@ -893,16 +986,45 @@
         <div class="room-item">
           <div>
             <span class="room-code-tag">${r.code}</span>
-            <span style="font-size:11px; margin-left:6px; color:var(--muted);">${r.mode.toUpperCase()} · ${r.players}/2 Người</span>
+            <span style="font-size:11px; margin-left:6px; color:var(--muted);">${r.mode.toUpperCase()} · ${r.players}/2 Người ${r.passwordProtected ? '· 🔒 Có mật khẩu' : '· Công khai'}</span>
           </div>
-          <button class="room-join-btn" onclick="joinByCode('${r.code}')">Vào đấu</button>
+          <button class="room-join-btn" onclick="joinByCode('${r.code}', ${r.passwordProtected})">Vào đấu</button>
         </div>
       `).join('');
     }
 
-    window.joinByCode = function(code) {
+    async function loadLeaderboard() {
+      const listEl = $('leaderboard-list');
+      try {
+        const response = await fetch('/api/leaderboard');
+        if (!response.ok) throw new Error('Không thể tải bảng xếp hạng.');
+        const data = await response.json();
+        if (!data.leaderboard.length) {
+          listEl.innerHTML = '<p class="leaderboard-empty">Chưa có người chơi nào.</p>';
+          return;
+        }
+        listEl.innerHTML = data.leaderboard.map(item => `
+          <div class="leaderboard-row${Auth.getUser()?.id === item.id ? ' is-current-user' : ''}">
+            <span class="leaderboard-rank">${item.position}</span>
+            <span class="leaderboard-name">${item.username}<small>${item.wins} thắng / ${item.games} trận</small></span>
+            <strong class="leaderboard-elo">${item.elo}</strong>
+          </div>
+        `).join('');
+      } catch (error) {
+        listEl.innerHTML = `<p class="leaderboard-empty">${error.message}</p>`;
+      }
+    }
+
+    window.joinByCode = function(code, passwordProtected = false) {
+      let password = '';
+      if (passwordProtected) {
+        password = window.prompt('Nhập mật khẩu phòng:') || '';
+        if (!password) return;
+      } else if (passwordProtected === null) {
+        password = window.prompt('Nhập mật khẩu phòng (để trống nếu phòng không có mật khẩu):') || '';
+      }
       connectOnline(() => {
-        network.send('join', { code });
+        network.send('join', { code, password });
       });
     };
 
@@ -917,8 +1039,15 @@
 
     $('create-room').onclick = () => {
       connectOnline(() => {
-        network.send('create', { mode: selectedMode });
+        network.send('create', {
+          mode: selectedMode,
+          password: $('room-password').value.trim()
+        });
+        $('room-password').value = '';
       });
+    };
+    $('quick-match-btn').onclick = () => {
+      connectOnline(() => network.send('quick_match', { mode: selectedMode }));
     };
 
     $('join-form').onsubmit = (e) => {
@@ -928,7 +1057,7 @@
         showToast('Vui lòng nhập mã phòng!', 'warning');
         return;
       }
-      joinByCode(code);
+      joinByCode(code, null);
     };
 
     $('btn-vs-bot').onclick = () => {
@@ -1041,9 +1170,91 @@
     $('rules-btn').onclick = () => $('rules-modal').classList.remove('hidden');
     $('close-rules-btn').onclick = () => $('rules-modal').classList.add('hidden');
     $('btn-understood-rules').onclick = () => $('rules-modal').classList.add('hidden');
+    $('refresh-leaderboard-btn').onclick = loadLeaderboard;
+    $('refresh-rooms-btn').onclick = () => {
+      if (network && network.connected) network.send('list_rooms');
+    };
+
+    let authMode = 'login';
+    function updateAuthUI(user) {
+      $('auth-user').classList.toggle('hidden', !user);
+      $('auth-btn').classList.toggle('hidden', Boolean(user));
+      if (user) {
+        const elo = Number(user.elo);
+        $('profile-btn').textContent = `👤 ${user.username} · ${Number.isFinite(elo) && elo >= 0 ? elo : 100} ELO`;
+      }
+    }
+
+    async function openProfile() {
+      const user = Auth.getUser();
+      if (!user) return openAuth('login');
+      const response = await fetch(`/api/profile/${encodeURIComponent(user.id)}`);
+      const data = await response.json();
+      if (!response.ok) return showToast(data.error || 'Không thể tải hồ sơ.', 'error');
+      const profile = data.profile;
+      $('profile-name').textContent = profile.username;
+      $('profile-summary').innerHTML = `<strong>${profile.elo} ELO</strong> · ${profile.rank}<br>${profile.wins} thắng / ${profile.games} trận`;
+      $('profile-history').innerHTML = profile.matches.length
+        ? profile.matches.map(match => `<div class="profile-match ${match.result}"><strong>${match.result === 'win' ? '🏆 Thắng' : '💔 Thua'}</strong> trước ${match.opponent}<span>${match.change > 0 ? '+' : ''}${match.change} ELO · ${match.mode}</span></div>`).join('')
+        : '<p>Chưa có lịch sử trận đấu.</p>';
+      $('profile-modal').classList.remove('hidden');
+    }
+
+    function openAuth(mode = 'login') {
+      authMode = mode;
+      $('auth-title').textContent = mode === 'login' ? 'Đăng nhập' : 'Tạo tài khoản';
+      $('auth-submit').textContent = mode === 'login' ? 'Đăng nhập' : 'Đăng ký';
+      $('auth-switch').textContent = mode === 'login' ? 'Chưa có tài khoản? Đăng ký' : 'Đã có tài khoản? Đăng nhập';
+      $('auth-password-input').setAttribute('autocomplete', mode === 'login' ? 'current-password' : 'new-password');
+      $('auth-message').textContent = '';
+      $('auth-modal').classList.remove('hidden');
+    }
+
+    $('auth-btn').onclick = () => openAuth('login');
+    $('profile-btn').onclick = () => openProfile().catch(error => showToast(error.message, 'error'));
+    $('close-profile-btn').onclick = () => $('profile-modal').classList.add('hidden');
+    $('close-auth-btn').onclick = () => $('auth-modal').classList.add('hidden');
+    $('auth-switch').onclick = () => openAuth(authMode === 'login' ? 'register' : 'login');
+    $('logout-btn').onclick = async () => {
+      try {
+        await Auth.logout();
+        showToast('Đã đăng xuất.', 'info');
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    };
+    $('auth-form').onsubmit = async (event) => {
+      event.preventDefault();
+      const username = $('auth-username-input').value.trim();
+      const password = $('auth-password-input').value;
+      $('auth-submit').disabled = true;
+      $('auth-message').textContent = '';
+      try {
+        if (authMode === 'login') await Auth.login(username, password);
+        else await Auth.register(username, password);
+        $('auth-modal').classList.add('hidden');
+        $('auth-form').reset();
+        showToast(authMode === 'login' ? 'Đăng nhập thành công.' : 'Tạo tài khoản thành công.', 'info');
+      } catch (error) {
+        $('auth-message').textContent = error.message;
+        $('auth-message').className = 'message error';
+      } finally {
+        $('auth-submit').disabled = false;
+      }
+    };
+    Auth.onChange((user, options = {}) => {
+      updateAuthUI(user);
+      if (network && !options.preserveConnection) {
+        network.socket?.close();
+        network = null;
+      }
+      loadLeaderboard();
+    });
 
     // Auto connect and join from URL query (?room=CODE)
     window.addEventListener('DOMContentLoaded', () => {
+      Auth.load().catch(error => showToast(error.message, 'error'));
+      loadLeaderboard();
       connectOnline(() => {
         network.send('list_rooms');
       });
@@ -1052,7 +1263,10 @@
       const queryRoom = params.get('room');
       if (queryRoom) {
         $('room-code').value = queryRoom.toUpperCase();
-        setTimeout(() => joinByCode(queryRoom), 300);
+        setTimeout(() => {
+          if (Auth.getUser()) joinByCode(queryRoom, null);
+          else openAuth('login');
+        }, 300);
       }
     });
   </script>
