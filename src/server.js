@@ -11,6 +11,7 @@ const { createReplay, saveReplay } = require('./replay');
 const { runMatch } = require('./matchRunner');
 const TournamentManager = require('./tournamentManager');
 const { AuthStore } = require('./authStore');
+const CommunityTournamentManager = require('./communityTournamentManager');
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -98,6 +99,19 @@ const tournaments = new TournamentManager(TOURNAMENT_DIR, {
   resolveBot: getBotDefinition,
   runMatch
 });
+const communityTournaments = new CommunityTournamentManager(
+  path.join(TOURNAMENT_DIR, 'community-events.json'),
+  {
+    startTournament: event => tournaments.create({
+      name: event.name,
+      botIds: event.players.map(player => player.botId),
+      mode: event.mode,
+      maxTurns: event.maxTurns,
+      format: 'single-elimination'
+    })
+  }
+);
+communityTournaments.startTournament.read = id => tournaments.read(id);
 
 function getBotDisplayName(botId) {
   if (botId === 'minimax') return 'Minimax Bot';
@@ -164,6 +178,60 @@ function requireAdmin(req, res, next) {
 
 app.get('/api/admin/users', requireAdmin, (req, res) => {
   res.json({ users: auth.listUsers() });
+});
+
+app.get('/api/community-tournaments', (req, res) => {
+  communityTournaments.sync();
+  res.json({ tournaments: communityTournaments.list() });
+});
+
+app.post('/api/community-tournaments', requireAdmin, (req, res) => {
+  const mode = req.body?.mode;
+  const maxTurns = Number(req.body?.maxTurns || 300);
+  if (!['classic', 'tactical', 'army'].includes(mode)) {
+    return res.status(400).json({ error: 'Hãy chọn chế độ chơi hợp lệ.' });
+  }
+  if (!Number.isInteger(maxTurns) || maxTurns < 20 || maxTurns > 2000) {
+    return res.status(400).json({ error: 'Giới hạn lượt phải từ 20 đến 2000.' });
+  }
+  res.status(201).json({ tournament: communityTournaments.create({ name: req.body?.name, mode, maxTurns }) });
+});
+
+app.post('/api/community-tournaments/:id/register', (req, res) => {
+  const user = getRequestUser(req);
+  if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để đăng ký bot.' });
+  const filename = String(req.body?.filename || '');
+  const source = req.body?.source;
+  const name = String(req.body?.name || filename.replace(/\.py$/i, '')).trim().slice(0, 60) || 'Community Bot';
+  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
+    return res.status(400).json({ error: 'Tên file bot không hợp lệ.' });
+  }
+  if (typeof source !== 'string' || !source.trim()) return res.status(400).json({ error: 'File bot không được để trống.' });
+  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
+  const botId = crypto.randomUUID();
+  const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.py`), source, { encoding: 'utf8', flag: 'wx' });
+  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.json`), `${JSON.stringify({
+    id: botId, name, originalFilename: filename, sha256, ownerId: user.id, ownerName: user.username,
+    createdAt: new Date().toISOString()
+  }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  const result = communityTournaments.register(req.params.id, { userId: user.id, username: user.username, botId: `submission:${botId}`, botName: name });
+  if (result.error) {
+    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.py`), { force: true });
+    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.json`), { force: true });
+    return res.status(400).json({ error: result.error });
+  }
+  res.status(201).json({ tournament: result.event });
+});
+
+app.post('/api/community-tournaments/:id/start', requireAdmin, (req, res) => {
+  try {
+    const result = communityTournaments.start(req.params.id);
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.json({ tournament: result.event });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.post('/api/auth/register', (req, res) => {

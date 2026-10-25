@@ -191,6 +191,18 @@ tiến độ và replay được lưu trong
 lên từ giao diện được lưu thành phiên bản bất biến trong `bots/submissions/`.
 Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi khởi động lại server.
 
+### Giải cộng đồng do admin tổ chức
+
+Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 12 suất. Người chơi
+đăng nhập rồi mở `/tournaments.html`, chọn một file Python và bấm **Đăng ký
+bot** trong giải cộng đồng. Mỗi tài khoản chỉ được đăng ký một bot trong mỗi
+giải; một submission cũng không thể được dùng bởi hai tài khoản. Admin có thể
+bắt đầu khi có từ 2 đến 12 người, hệ thống tự tạo bracket loại trực tiếp và
+hiển thị tiến độ, danh sách người chơi và nhà vô địch công khai.
+
+Thông tin giải cộng đồng được lưu tại `matches/tournaments/community-events.json`;
+file bot bất biến và metadata chủ sở hữu nằm trong `bots/submissions/`.
+
 Có thể tạo giải round-robin từ terminal với hai bot mẫu:
 
 ```powershell

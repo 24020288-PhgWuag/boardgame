@@ -79,6 +79,11 @@
           <div id="tournament-list" class="tournament-list">Đang tải giải đấu…</div>
         </section>
       </div>
+      <section class="tournament-card" style="margin-top:18px">
+        <h2>Giải cộng đồng</h2>
+        <p class="muted">Admin mở giải tối đa 12 tài khoản. Mỗi tài khoản được đăng ký đúng một bot Python để đấu loại trực tiếp.</p>
+        <div id="community-list" class="tournament-list">Đang tải giải cộng đồng…</div>
+      </section>
     </section>
   </main>
   <script>
@@ -88,6 +93,7 @@
     const uploadStatus = document.getElementById('upload-status');
     let selectedTournamentId = null;
     const expandedTournamentIds = new Set();
+    const communityList = document.getElementById('community-list');
 
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -148,6 +154,50 @@
       if (!tournaments.length) {
         tournamentList.textContent = 'Chưa có giải đấu. Chọn bot và bắt đầu giải mới.';
         return;
+      }
+
+      async function loadCommunityTournaments() {
+        const response = await fetch('/api/community-tournaments');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
+        communityList.innerHTML = data.tournaments.length ? data.tournaments.map(event => {
+          const registered = event.players.map(player => `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName)}</li>`).join('');
+          const canJoin = event.status === 'registration' && event.players.length < 12;
+          return `<article class="tournament-item">
+            <div class="tournament-status">${escapeHtml(event.status)} · ${event.players.length}/12 người</div>
+            <h3>${escapeHtml(event.name)}</h3>
+            <div class="tournament-meta">Đấu loại trực tiếp · tối đa ${event.maxTurns} lượt/trận</div>
+            <ul>${registered || '<li class="muted">Chưa có người đăng ký.</li>'}</ul>
+            ${event.champion ? `<div class="champion">🏆 Nhà vô địch: <strong>${escapeHtml(event.champion)}</strong></div>` : ''}
+            ${canJoin ? `<form class="community-register" data-event-id="${escapeHtml(event.id)}">
+              <input name="name" maxlength="60" placeholder="Tên bot của bạn" required>
+              <input name="file" type="file" accept=".py,text/x-python" required>
+              <button class="primary-button">Đăng ký bot</button>
+              <small class="muted" data-status></small>
+            </form>` : ''}
+          </article>`;
+        }).join('') : '<p class="muted">Chưa có giải cộng đồng nào.</p>';
+        document.querySelectorAll('.community-register').forEach(form => form.addEventListener('submit', async event => {
+          event.preventDefault();
+          const file = form.elements.file.files[0];
+          const status = form.querySelector('[data-status]');
+          if (!file || !file.name.toLowerCase().endsWith('.py')) {
+            status.textContent = 'Hãy chọn file Python .py.';
+            return;
+          }
+          if (file.size > 256 * 1024) {
+            status.textContent = 'File bot tối đa 256 KB.';
+            return;
+          }
+          status.textContent = 'Đang đăng ký…';
+          const response = await fetch(`/api/community-tournaments/${form.dataset.eventId}/register`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name: form.elements.name.value, filename: file.name, source: await file.text() })
+          });
+          const result = await response.json();
+          status.textContent = result.error || 'Đăng ký thành công.';
+          if (response.ok) loadCommunityTournaments();
+        }));
       }
       const selected = selectedTournamentId && tournaments.find(item => item.id === selectedTournamentId);
       const ids = selected ? [selected, ...tournaments.filter(item => item.id !== selectedTournamentId)] : tournaments;
@@ -240,7 +290,11 @@
 
     loadBots().catch(error => { botList.textContent = error.message; });
     loadTournaments().catch(error => { tournamentList.textContent = error.message; });
-    setInterval(() => loadTournaments().catch(() => {}), 2500);
+    loadCommunityTournaments().catch(error => { communityList.textContent = error.message; });
+    setInterval(() => {
+      loadTournaments().catch(() => {});
+      loadCommunityTournaments().catch(() => {});
+    }, 2500);
   </script>
 </body>
 </html>
