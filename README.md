@@ -46,8 +46,10 @@ ghi log chẩn đoán vào `stderr`.
 
 ### Bảo vệ khi chạy bot không đáng tin
 
-Bot tải lên và bot đăng ký giải cộng đồng không được chạy trực tiếp bằng Python
-trên host. Tạo image runner một lần:
+Tải bot lên và đăng ký giải cộng đồng yêu cầu đăng nhập. Mỗi tài khoản được lưu
+tối đa 5 bot; giới hạn tải lên là 5 lần/phút cho mỗi tài khoản và 10 lần/phút
+cho mỗi địa chỉ IP. Tệp nguồn tối đa 256 KiB. Bot tải lên và bot đăng ký giải
+cộng đồng không được chạy trực tiếp bằng Python trên host. Tạo image runner một lần:
 
 ```powershell
 docker build -f .\docker\bot-runner.Dockerfile -t boardgame-python-bot:latest .\docker
@@ -69,8 +71,11 @@ giới bảo mật tuyệt đối: bot vẫn chạy mã native qua runtime, và 
 chung kernel host. Với dịch vụ công khai, chạy Docker trên worker/VM riêng,
 không mount socket Docker hay dữ liệu host, luôn vá kernel/runtime và ưu tiên
 runtime có cách ly kernel như gVisor/Kata Containers. Pin image theo digest đã
-kiểm tra trong production. Tiếp tục áp dụng quota upload, xác thực/giới hạn tốc
-độ API, hàng đợi có giới hạn concurrency, giám sát và xóa container sau trận.
+kiểm tra trong production. Giới hạn upload theo IP hiện lưu trong bộ nhớ của
+một tiến trình; nếu chạy nhiều server, cần dùng rate limiter dùng chung. Tiếp
+tục giám sát tải bot và dọn container sau trận.
+Mỗi bot được gắn với chủ sở hữu và lưu SHA-256; server xác minh checksum trước
+khi chạy để phát hiện tệp bot bị thay đổi ngoài luồng upload.
 
 Mỗi trận bot-vs-bot hoàn tất cũng được tự động lưu thành replay trong thư mục
 `matches/`. Tên file có dạng

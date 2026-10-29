@@ -948,6 +948,10 @@
         $('bot-upload-status').textContent = 'Chỉ chấp nhận file Python .py.';
         return;
       }
+      if (file.size > 256 * 1024) {
+        $('bot-upload-status').textContent = 'File bot tối đa 256 KiB.';
+        return;
+      }
       try {
         const source = await file.text();
         const response = await fetch('/api/bots', {

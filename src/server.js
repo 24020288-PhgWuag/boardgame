@@ -16,9 +16,11 @@ const { AuthStore } = require('./authStore');
 const CommunityTournamentManager = require('./communityTournamentManager');
 const matchResultSheets = require('./matchResultSheets');
 const RoomStateStore = require('./roomStateStore');
+const BotUploadRateLimiter = require('./botUploadRateLimiter');
+const { createSubmission } = require('./botSubmissions');
 
 const app = express();
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '300kb' }));
 app.use('/api/match-results', matchResultSheets.router);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
@@ -31,6 +33,7 @@ const auth = new AuthStore(
   path.join(__dirname, '..', 'data', 'users.json')
 );
 const requestWindows = new Map();
+const botUploadRateLimiter = new BotUploadRateLimiter();
 let lastCpuSample = { usage: process.cpuUsage(), sampledAt: Date.now() };
 const matchmakingQueue = [];
 const TURN_LIMIT_MS = 30 * 1000;
@@ -111,8 +114,21 @@ function getBotDefinition(botId) {
     untrusted = true;
   }
   if (!fs.existsSync(script)) return null;
-  sha256 ||= crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
+  const actualSha256 = crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
+  if (sha256 && sha256 !== actualSha256) {
+    console.error(`Bot submission checksum mismatch: ${botId}`);
+    return null;
+  }
+  sha256 ||= actualSha256;
   return { id: botId, name, script, sha256, untrusted };
+}
+
+function enforceBotUploadLimits(req, res, user) {
+  const retryAfter = botUploadRateLimiter.consume(req.socket.remoteAddress || 'unknown', user.id);
+  if (!retryAfter) return true;
+  res.setHeader('Retry-After', String(retryAfter));
+  res.status(429).json({ error: 'Bạn tải bot quá nhanh. Vui lòng thử lại sau.', retryAfter });
+  return false;
 }
 
 function interactiveBotProcessCount() {
@@ -270,25 +286,23 @@ app.post('/api/community-tournaments', requireAdmin, (req, res) => {
 app.post('/api/community-tournaments/:id/register', (req, res) => {
   const user = getRequestUser(req);
   if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để đăng ký bot.' });
-  const filename = String(req.body?.filename || '');
-  const source = req.body?.source;
-  const name = String(req.body?.name || filename.replace(/\.py$/i, '')).trim().slice(0, 60) || 'Community Bot';
-  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
-    return res.status(400).json({ error: 'Tên file bot không hợp lệ.' });
-  }
-  if (typeof source !== 'string' || !source.trim()) return res.status(400).json({ error: 'File bot không được để trống.' });
-  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
-  const botId = crypto.randomUUID();
-  const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
-  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.py`), source, { encoding: 'utf8', flag: 'wx' });
-  fs.writeFileSync(path.join(SUBMISSION_DIR, `${botId}.json`), `${JSON.stringify({
-    id: botId, name, originalFilename: filename, sha256, ownerId: user.id, ownerName: user.username,
-    createdAt: new Date().toISOString()
-  }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-  const result = communityTournaments.register(req.params.id, { userId: user.id, username: user.username, botId: `submission:${botId}`, botName: name });
+  if (!enforceBotUploadLimits(req, res, user)) return;
+  const submission = createSubmission(SUBMISSION_DIR, {
+    filename: String(req.body?.filename || ''),
+    source: req.body?.source,
+    name: req.body?.name || 'Community Bot',
+    user
+  });
+  if (submission.error) return res.status(submission.status).json({ error: submission.error });
+  const result = communityTournaments.register(req.params.id, {
+    userId: user.id,
+    username: user.username,
+    botId: `submission:${submission.id}`,
+    botName: submission.name
+  });
   if (result.error) {
-    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.py`), { force: true });
-    fs.rmSync(path.join(SUBMISSION_DIR, `${botId}.json`), { force: true });
+    fs.rmSync(path.join(SUBMISSION_DIR, `${submission.id}.py`), { force: true });
+    fs.rmSync(path.join(SUBMISSION_DIR, `${submission.id}.json`), { force: true });
     return res.status(400).json({ error: result.error });
   }
   res.status(201).json({ tournament: result.event });
@@ -354,24 +368,19 @@ app.get('/api/bots', (req, res) => {
 });
 
 app.post('/api/bots', (req, res) => {
-  const filename = String(req.body?.filename || '');
-  const source = req.body?.source;
-  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
-    return res.status(400).json({ error: 'Tên bot phải kết thúc bằng .py và chỉ chứa chữ, số, _, -.' });
-  }
-  if (typeof source !== 'string' || !source.trim()) {
-    return res.status(400).json({ error: 'File bot không được để trống.' });
-  }
-  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) {
-    return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
-  }
-  const id = crypto.randomUUID();
-  const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
-  const safeName = String(req.body?.name || filename.replace(/\.py$/i, '')).trim().slice(0, 60) || 'Python Bot';
-  const metadata = { id, name: safeName, originalFilename: filename, sha256, createdAt: new Date().toISOString() };
-  fs.writeFileSync(path.join(SUBMISSION_DIR, `${id}.py`), source, { encoding: 'utf8', flag: 'wx' });
-  fs.writeFileSync(path.join(SUBMISSION_DIR, `${id}.json`), `${JSON.stringify(metadata, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-  res.status(201).json({ bot: { id: `submission:${id}`, name: safeName, sha256 } });
+  const user = getRequestUser(req);
+  if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để tải bot lên.' });
+  if (!enforceBotUploadLimits(req, res, user)) return;
+  const submission = createSubmission(SUBMISSION_DIR, {
+    filename: String(req.body?.filename || ''),
+    source: req.body?.source,
+    name: req.body?.name,
+    user
+  });
+  if (submission.error) return res.status(submission.status).json({ error: submission.error });
+  res.status(201).json({
+    bot: { id: `submission:${submission.id}`, name: submission.name, sha256: submission.sha256 }
+  });
 });
 
 app.get('/api/tournaments', (req, res) => {
