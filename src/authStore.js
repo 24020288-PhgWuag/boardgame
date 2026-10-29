@@ -37,9 +37,15 @@ class AuthStore {
       );
       CREATE INDEX IF NOT EXISTS matches_winner_idx ON matches (winner_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS matches_loser_idx ON matches (loser_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions (expires_at);
     `);
     this.migrateLegacyUsers(legacyJsonPath);
-    this.sessions = new Map();
+    this.deleteExpiredSessions();
   }
 
   migrateLegacyUsers(filePath) {
@@ -160,23 +166,36 @@ class AuthStore {
 
   createSession(user) {
     const token = crypto.randomBytes(32).toString('hex');
-    this.sessions.set(token, { id: user.id, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    this.database.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)')
+      .run(token, user.id, expiresAt);
     return token;
   }
 
   getSession(token) {
-    const session = this.sessions.get(token);
-    if (!session || session.expiresAt <= Date.now()) {
-      if (token) this.sessions.delete(token);
+    if (typeof token !== 'string' || !token) return null;
+    const session = this.database.prepare('SELECT user_id, expires_at FROM sessions WHERE token = ?').get(token);
+    if (!session) return null;
+    if (session.expires_at <= Date.now()) {
+      this.destroySession(token);
       return null;
     }
-    const row = this.database.prepare('SELECT * FROM users WHERE id = ?').get(session.id);
-    if (!row) return null;
+    const row = this.database.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id);
+    if (!row) {
+      this.destroySession(token);
+      return null;
+    }
     return this.publicUser(this.rowToUser(row));
   }
 
   destroySession(token) {
-    if (token) this.sessions.delete(token);
+    if (typeof token === 'string' && token) {
+      this.database.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    }
+  }
+
+  deleteExpiredSessions() {
+    this.database.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now());
   }
 
   getUser(userId) {

@@ -9,7 +9,7 @@ class RoomManager {
   createRoom(mode = 'army', password = '') {
     let code;
     do {
-      code = crypto.randomBytes(3).toString('hex').toUpperCase();
+      code = crypto.randomBytes(5).toString('hex').toUpperCase();
     } while (this.rooms.has(code));
 
     const room = {
@@ -20,6 +20,7 @@ class RoomManager {
       state: createInitialState(mode),
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
       spectators: new Set(),
+      disconnectedPlayers: new Set(),
       bot: null,
       botMatch: null,
       ratingUpdated: false,
@@ -59,33 +60,70 @@ class RoomManager {
       return { room, player: existingRole };
     }
 
-    // Check existing players in room
-    let p1Taken = false;
-    let p2Taken = false;
-
-    for (const [s, role] of room.sockets.entries()) {
-      if (s !== socket) {
-        if (role === 'p1') p1Taken = true;
-        if (role === 'p2') p2Taken = true;
-      }
-    }
-
     let role = null;
-    if (requestedRole === 'spectator' || (p1Taken && p2Taken)) {
+    const username = socket.user?.username;
+    if (requestedRole === 'spectator') {
       role = 'spectator';
       room.spectators.add(socket);
-    } else if (!p1Taken) {
-      role = 'p1';
-    } else if (!p2Taken) {
-      role = 'p2';
+    } else {
+      const occupied = new Set(room.sockets.values());
+      const returningRole = ['p1', 'p2'].find(player =>
+        username && room.state.players[player] === username &&
+        room.disconnectedPlayers.has(player) && !occupied.has(player)
+      );
+      const alreadySeated = username && ['p1', 'p2'].some(player =>
+        room.state.players[player] === username
+      );
+      const availableRole = alreadySeated ? null : ['p1', 'p2'].find(player =>
+        !occupied.has(player) && !room.state.players[player]
+      );
+      if (returningRole) role = returningRole;
+      else if (availableRole) role = availableRole;
+      else role = 'spectator';
+      if (role === 'spectator') room.spectators.add(socket);
     }
 
     room.sockets.set(socket, role);
     if (role === 'p1' || role === 'p2') {
-      room.state.players[role] = role;
+      room.state.players[role] ||= username || role;
+      room.disconnectedPlayers.delete(role);
     }
 
     return { room, player: role };
+  }
+
+  restoreRoom(snapshot, { assumeDisconnected = false } = {}) {
+    if (!snapshot || typeof snapshot.code !== 'string' ||
+        !snapshot.state?.players || !snapshot.state.board) return null;
+    const disconnectedPlayers = assumeDisconnected
+      ? ['p1', 'p2'].filter(player => snapshot.state.players[player])
+      : (Array.isArray(snapshot.disconnectedPlayers) ? snapshot.disconnectedPlayers : [])
+        .filter(player => player === 'p1' || player === 'p2');
+    const existing = this.getRoom(snapshot.code);
+    if (existing) {
+      existing.mode = snapshot.mode;
+      existing.createdAt = snapshot.createdAt;
+      existing.matchResultId = snapshot.matchResultId;
+      existing.passwordHash = snapshot.passwordHash || null;
+      existing.state = snapshot.state;
+      existing.turnDeadline = snapshot.turnDeadline || null;
+      existing.ratingUpdated = Boolean(snapshot.ratingUpdated);
+      existing.resultQueued = Boolean(snapshot.resultQueued);
+      existing.disconnectedPlayers = new Set(disconnectedPlayers);
+      return existing;
+    }
+
+    const room = {
+      ...snapshot,
+      sockets: new Map(),
+      spectators: new Set(),
+      disconnectedPlayers: new Set(disconnectedPlayers),
+      bot: null,
+      botMatch: null,
+      turnTimer: null
+    };
+    this.rooms.set(room.code, room);
+    return room;
   }
 
   resetRoom(code, mode = null) {
@@ -96,13 +134,7 @@ class RoomManager {
     room.matchResultId = crypto.randomUUID();
     room.resultQueued = false;
     const newState = createInitialState(currentMode);
-    
-    // Retain connected player slots
-    for (const [, role] of room.sockets.entries()) {
-      if (role === 'p1' || role === 'p2') {
-        newState.players[role] = role;
-      }
-    }
+    newState.players = { ...room.state.players };
     room.state = newState;
     return room;
   }
@@ -110,15 +142,15 @@ class RoomManager {
   getPublicRooms() {
     const list = [];
     for (const [code, room] of this.rooms.entries()) {
-      let p1 = false;
-      let p2 = Boolean(room.bot || room.botMatch);
+      let p1 = Boolean(room.state.players.p1);
+      let p2 = Boolean(room.state.players.p2 || room.bot || room.botMatch);
       let spectators = 0;
       for (const [, role] of room.sockets.entries()) {
         if (role === 'p1') p1 = true;
         if (role === 'p2') p2 = true;
         if (role === 'spectator') spectators++;
       }
-      if (p1 && p2 || room.state.history.length || room.bot || room.botMatch) continue;
+      if ((p1 && p2) || room.state.history.length || room.bot || room.botMatch) continue;
       list.push({
         code,
         mode: room.mode || 'army',
@@ -138,25 +170,30 @@ class RoomManager {
         const role = room.sockets.get(socket);
         room.sockets.delete(socket);
         room.spectators.delete(socket);
+        if (role === 'p1' || role === 'p2') room.disconnectedPlayers.add(role);
 
-        if (role === 'p1' || role === 'p2') {
-          room.state.players[role] = null;
-        }
-
-        // If room is completely empty, clean up
+        // Keep the seat identity so the same authenticated player can reconnect.
         if (room.sockets.size === 0) {
-          room.bot?.stop();
-          room.botMatch?.p1?.stop();
-          room.botMatch?.p2?.stop();
           clearTimeout(room.turnTimer);
-          this.rooms.delete(code);
-          return { code, empty: true };
+          if (room.bot || room.botMatch) this.deleteRoom(code);
+          return { code, room, disconnectedRole: role, empty: true };
         }
 
         return { code, room, disconnectedRole: role, empty: false };
       }
     }
     return null;
+  }
+
+  deleteRoom(code) {
+    const room = this.getRoom(code);
+    if (!room || room.sockets.size) return false;
+    room.bot?.stop();
+    room.botMatch?.p1?.stop();
+    room.botMatch?.p2?.stop();
+    clearTimeout(room.turnTimer);
+    this.rooms.delete(room.code);
+    return true;
   }
 }
 

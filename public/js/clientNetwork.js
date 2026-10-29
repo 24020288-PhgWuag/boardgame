@@ -7,11 +7,15 @@ window.ClientNetwork = class {
     this.latency = 0;
     this.connected = false;
     this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.everConnected = false;
+    this.stopped = false;
 
     this.connect();
   }
 
   connect() {
+    if (this.stopped || (this.socket && this.socket.readyState < WebSocket.CLOSING)) return;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = location.host || 'localhost:3000';
     const wsUrl = `${protocol}//${host}`;
@@ -20,9 +24,16 @@ window.ClientNetwork = class {
       this.socket = new WebSocket(wsUrl);
 
       this.socket.addEventListener('open', () => {
+        const reconnecting = this.everConnected;
+        this.everConnected = true;
+        this.reconnectAttempts = 0;
         this.connected = true;
         this.emit('open');
         this.startPing();
+        if (reconnecting) {
+          this.rejoinRoom();
+          this.emit('reconnect');
+        }
       });
 
       this.socket.addEventListener('message', (event) => {
@@ -33,6 +44,7 @@ window.ClientNetwork = class {
             this.emit('latency', this.latency);
             return;
           }
+          if (data.type === 'joined') this.rememberRoom(data);
           this.emit(data.type, data);
           this.emit('*', data);
         } catch (err) {
@@ -44,6 +56,7 @@ window.ClientNetwork = class {
         this.connected = false;
         this.stopPing();
         this.emit('close');
+        this.scheduleReconnect();
       });
 
       this.socket.addEventListener('error', (err) => {
@@ -51,7 +64,57 @@ window.ClientNetwork = class {
       });
     } catch (err) {
       console.error('WebSocket connection error:', err);
+      this.scheduleReconnect();
     }
+  }
+
+  rememberRoom(data) {
+    if (data.bot || data.botMatch || data.player === 'spectator') {
+      this.clearRoom();
+      return;
+    }
+    if (!data.code || !['p1', 'p2'].includes(data.player)) return;
+    try {
+      sessionStorage.setItem('ott_active_room', JSON.stringify({
+        code: data.code,
+        player: data.player
+      }));
+    } catch (error) {
+      console.warn('Could not save room reconnection details:', error);
+    }
+  }
+
+  rejoinRoom() {
+    try {
+      const activeRoom = JSON.parse(sessionStorage.getItem('ott_active_room') || 'null');
+      if (activeRoom?.code) {
+        this.send('join', {
+          code: activeRoom.code,
+          role: activeRoom.player,
+          reconnect: true
+        });
+      }
+    } catch (error) {
+      console.warn('Could not restore the previous room:', error);
+    }
+  }
+
+  clearRoom() {
+    try {
+      sessionStorage.removeItem('ott_active_room');
+    } catch (error) {
+      console.warn('Could not clear saved room details:', error);
+    }
+  }
+
+  scheduleReconnect() {
+    if (this.stopped || this.reconnectTimer) return;
+    const delay = Math.min(1000 * (2 ** this.reconnectAttempts), 15000);
+    this.reconnectAttempts++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   on(event, handler) {
@@ -100,5 +163,13 @@ window.ClientNetwork = class {
       clearInterval(this.pingInterval);
       this.pingInterval = null;
     }
+  }
+
+  stop() {
+    this.stopped = true;
+    this.stopPing();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.socket?.close();
   }
 };

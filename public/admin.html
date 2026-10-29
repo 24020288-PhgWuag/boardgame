@@ -11,6 +11,10 @@
     <header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong></a></header>
     <section class="lobby-panel" style="margin:40px auto; max-width:900px;">
       <p class="eyebrow">QUẢN TRỊ</p>
+      <h1>Giám sát hệ thống</h1>
+      <p id="metrics-status" class="message" aria-live="polite">Đang tải metrics…</p>
+      <div id="system-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px"></div>
+      <hr style="margin:28px 0;border:0;border-top:1px solid var(--line)">
       <h1>Người chơi</h1>
       <p id="admin-message" class="message"></p>
       <div id="admin-users"></div>
@@ -27,6 +31,35 @@
     </section>
   </main>
   <script>
+    const metricsPanel = document.getElementById('system-metrics');
+    const metricsStatus = document.getElementById('metrics-status');
+    async function loadMetrics() {
+      try {
+        const response = await fetch('/api/admin/metrics');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tải metrics.');
+        metricsPanel.innerHTML = [
+          ['WebSocket', data.connections],
+          ['Phòng đang chạy', data.rooms],
+          ['Phòng có người chơi', data.roomsWithPlayers],
+          ['RAM (RSS)', `${(data.memory.rssBytes / 1024 / 1024).toFixed(1)} MB`],
+          ['Heap', `${(data.memory.heapUsedBytes / 1024 / 1024).toFixed(1)} / ${(data.memory.heapTotalBytes / 1024 / 1024).toFixed(1)} MB`],
+          ['CPU tiến trình', `${data.cpu.percent.toFixed(1)}%`],
+          ['WebSocket RTT P95', data.latencyMs.p95 === null ? '—' : `${data.latencyMs.p95} ms`],
+          ['Bot tiến trình', data.botProcesses],
+          ['Uptime', `${Math.floor(data.uptimeSeconds / 60)} phút`]
+        ].map(([label, value]) => `
+          <div style="padding:14px;border:1px solid var(--line);border-radius:8px">
+            <small>${label}</small><div style="font-size:1.35rem;font-weight:700">${value}</div>
+          </div>`).join('');
+        metricsStatus.textContent = `Cập nhật lúc ${new Date().toLocaleTimeString()}`;
+      } catch (error) {
+        metricsStatus.textContent = error.message;
+      }
+    }
+    loadMetrics();
+    setInterval(loadMetrics, 5000);
+
     fetch('/api/admin/users').then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Không có quyền.');

@@ -11,7 +11,8 @@
     "bot:match": "node src/botMatch.js",
     "bot:tournament": "node src/runTournament.js",
     "replay": "node src/replayMatch.js",
-    "load:test": "node tools/simulate-match-results.js"
+    "load:test": "node tools/simulate-match-results.js",
+    "load:ws": "node tools/simulate-websocket-load.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

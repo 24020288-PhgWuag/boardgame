@@ -99,6 +99,43 @@ Dữ liệu tài khoản và lịch sử trận được lưu trong `data/boardg
 Server tự migrate dữ liệu cũ từ `data/users.json` lần đầu chạy. SQLite dùng
 `node:sqlite`, vì vậy cần Node.js 22.5+ (khuyến nghị Node.js 24+).
 
+### Phục hồi phòng, scale nhiều instance và giám sát
+
+Để lưu trạng thái phòng PvP và hàng đợi tìm trận dùng chung giữa các process,
+cấu hình `ROOM_STATE_REDIS_URL` trỏ tới Redis có persistence. Server lưu snapshot
+phòng, đồng bộ sự kiện WebSocket và dùng khóa Redis khi xử lý join/nước đi; phòng
+có thể được khôi phục sau khi process khởi động lại trong tối đa 24 giờ. Hàng chờ
+tìm trận hết hạn sau 10 phút. Bot process không được tự khởi động lại từ snapshot;
+trận bot đang chạy cần bắt đầu lại sau khi server restart.
+
+Các instance phải dùng chung Redis và database SQLite trên cùng host/storage
+được hỗ trợ; không đặt file SQLite trên NFS. Triển khai nhiều máy cần chuyển
+tài khoản/session sang database server trước. Khi đặt sau load balancer, bật
+sticky session để WebSocket của cùng người chơi được chuyển tới cùng instance.
+Dùng TLS/WSS ở reverse proxy; cookie có cờ `Secure` khi `NODE_ENV=production`.
+Redis không được public ra Internet. Nếu Redis không cấu hình, server chạy chế
+độ một process và in cảnh báo về việc không có phục hồi/chia sẻ trạng thái phòng.
+
+Mở `/admin.html` để xem số WebSocket, phòng, RAM, CPU và uptime; API metrics yêu
+cầu tài khoản admin. Metrics là số liệu của process hiện tại. Các trận bot tương
+tác giới hạn tối đa 8 tiến trình trên mỗi instance để tránh tạo tải CPU/RAM không
+giới hạn. Giá trị CPU là mức sử dụng tiến trình Node giữa hai lần lấy mẫu dashboard.
+
+Chạy tải WebSocket có giới hạn trên localhost hoặc staging bạn sở hữu:
+
+```powershell
+$env:WS_LOAD_TEST_CLIENTS = "1000"
+$env:WS_LOAD_TEST_RAMP = "50"
+$env:WS_LOAD_TEST_DURATION_SECONDS = "30"
+npm run load:ws
+```
+
+Script mặc định chỉ kết nối loopback, tối đa 10.000 client và 5 phút. Để thử
+staging từ xa, đặt rõ `ALLOW_EXTERNAL_LOAD_TEST=true` và `WS_LOAD_TEST_URL`.
+Tăng tải từng bước; theo dõi metrics, latency và lỗi trước khi tăng số client.
+Stress test này kiểm tra WebSocket/ping/list phòng, không đại diện cho tải bot
+hay lưu lượng gameplay thực tế.
+
 ### Trang quản trị
 
 Mở `http://localhost:3000/admin.html`. API quản trị yêu cầu tài khoản khớp
