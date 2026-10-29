@@ -10,7 +10,7 @@ function clone(value) {
 async function runMatch(options) {
   const {
     mode = 'army', maxTurns = 500, botP1, botP2,
-    replayPath, matchId = 'bot-match', timeoutMs = 5000,
+    replayPath, matchId = 'bot-match', timeoutMs = 10000,
     matchTimeoutMs = Number(process.env.BOT_MATCH_TIMEOUT_MS || 30 * 60 * 1000)
   } = options;
   if (!botP1?.script || !botP2?.script) throw new Error('Both bots need script paths.');

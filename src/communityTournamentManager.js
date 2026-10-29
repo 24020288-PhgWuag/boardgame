@@ -2,6 +2,11 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+function sleepSync(ms) {
+  const shared = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(shared), 0, 0, ms);
+}
+
 class CommunityTournamentManager {
   constructor(filePath, { startTournament }) {
     this.filePath = filePath;
@@ -24,19 +29,35 @@ class CommunityTournamentManager {
   save() {
     const temporary = `${this.filePath}.tmp`;
     fs.writeFileSync(temporary, `${JSON.stringify(this.events, null, 2)}\n`, 'utf8');
-    fs.renameSync(temporary, this.filePath);
+    let lastError;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        fs.renameSync(temporary, this.filePath);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 7) sleepSync(50 * (attempt + 1));
+      }
+    }
+    if (lastError) throw lastError;
   }
 
   create({ name, mode, maxTurns }) {
     const event = {
       id: crypto.randomUUID(),
       name: String(name || '').trim().slice(0, 60) || 'Giải vô địch cộng đồng',
+      format: 'swiss',
       mode,
       maxTurns,
-      maxPlayers: 12,
+      maxPlayers: 20,
       status: 'registration',
       players: [],
       tournamentId: null,
+      currentRound: 0,
+      totalRounds: null,
+      completedMatches: 0,
+      matchCount: 0,
       champion: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -63,7 +84,7 @@ class CommunityTournamentManager {
     if (event.status !== 'registration') return { error: 'Giải này đã đóng đăng ký.' };
     if (event.players.some(item => item.userId === player.userId)) return { error: 'Mỗi tài khoản chỉ được đăng ký một bot.' };
     if (event.players.some(item => item.botId === player.botId)) return { error: 'Bot này đã được đăng ký trong giải.' };
-    if (event.players.length >= event.maxPlayers) return { error: 'Giải đã đủ 12 người chơi.' };
+    if (event.players.length >= event.maxPlayers) return { error: `Giải đã đủ ${event.maxPlayers} người chơi.` };
     event.players.push({ ...player, registeredAt: new Date().toISOString() });
     event.updatedAt = new Date().toISOString();
     this.save();
@@ -80,6 +101,12 @@ class CommunityTournamentManager {
     this.save();
     const tournament = this.startTournament(event);
     event.tournamentId = tournament.id;
+    event.format = tournament.format;
+    event.currentRound = tournament.currentRound || 1;
+    event.totalRounds = tournament.totalRounds || null;
+    event.matchCount = tournament.totalRounds
+      ? tournament.totalRounds * Math.floor(tournament.bots.length / 2)
+      : tournament.matches.length;
     event.status = 'running';
     event.updatedAt = new Date().toISOString();
     this.save();
@@ -91,9 +118,21 @@ class CommunityTournamentManager {
       if (!event.tournamentId) continue;
       const tournament = this.startTournament.read(event.tournamentId);
       if (!tournament) continue;
+      event.format = tournament.format || event.format;
+      event.currentRound = tournament.currentRound || event.currentRound;
+      event.totalRounds = tournament.totalRounds || event.totalRounds;
+      event.completedMatches = tournament.matches.filter(match => match.status === 'completed' &&
+        (tournament.format !== 'swiss' || !match.result?.bye)).length;
+      event.matchCount = tournament.totalRounds
+        ? tournament.totalRounds * Math.floor(tournament.bots.length / 2)
+        : tournament.matches.length;
       if (tournament.status === 'completed') {
         event.status = 'completed';
         event.champion = tournament.champion || null;
+        event.updatedAt = new Date().toISOString();
+      } else if (tournament.status === 'failed') {
+        event.status = 'failed';
+        event.error = tournament.error || 'Giải đấu gặp lỗi.';
         event.updatedAt = new Date().toISOString();
       }
     }

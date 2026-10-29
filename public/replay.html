@@ -210,12 +210,12 @@
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = file;
+        link.download = file.endsWith('.json.gz') ? file.slice(0, -3) : file;
         document.body.appendChild(link);
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
-        status.textContent = `Đã tải xuống ${file}.`;
+        status.textContent = `Đã tải xuống ${link.download}.`;
       } catch (error) {
         status.textContent = error.message;
       }

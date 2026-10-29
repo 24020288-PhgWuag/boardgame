@@ -41,7 +41,8 @@
       if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
       document.getElementById('community-events').innerHTML = data.tournaments.map(event => `
         <div style="border:1px solid var(--line);padding:14px;margin-top:12px;border-radius:8px">
-          <strong>${event.name}</strong> · ${event.status} · ${event.players.length}/12 người
+          <strong>${event.name}</strong> · ${event.status} · ${event.players.length}/${event.maxPlayers} người
+          ${event.totalRounds ? `<small> · Swiss vòng ${event.currentRound}/${event.totalRounds} · ${event.completedMatches}/${event.matchCount} trận</small>` : ''}
           ${event.status === 'registration' ? `<button data-start="${event.id}" class="secondary-button" style="float:right">Bắt đầu</button>` : ''}
           <div>${event.players.map(player => `${player.username} — ${player.botName}`).join('<br>') || 'Chưa có người đăng ký'}</div>
           ${event.champion ? `<strong>🏆 ${event.champion}</strong>` : ''}

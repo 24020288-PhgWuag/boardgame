@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { applyMove, createInitialState } = require('./gameState');
 
 function clone(value) {
@@ -21,13 +22,18 @@ function createReplay(mode, initialState, moves, result) {
 function saveReplay(replay, filePath) {
   const resolvedPath = path.resolve(filePath);
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
-  fs.writeFileSync(resolvedPath, `${JSON.stringify(replay, null, 2)}\n`, 'utf8');
+  const serialized = `${JSON.stringify(replay)}\n`;
+  if (resolvedPath.endsWith('.gz')) fs.writeFileSync(resolvedPath, zlib.gzipSync(serialized));
+  else fs.writeFileSync(resolvedPath, `${JSON.stringify(replay, null, 2)}\n`, 'utf8');
   return resolvedPath;
 }
 
 function loadReplay(filePath) {
   const resolvedPath = path.resolve(filePath);
-  return JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+  const content = resolvedPath.endsWith('.gz')
+    ? zlib.gunzipSync(fs.readFileSync(resolvedPath)).toString('utf8')
+    : fs.readFileSync(resolvedPath, 'utf8');
+  return JSON.parse(content);
 }
 
 function playReplay(replay) {

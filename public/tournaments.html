@@ -8,11 +8,13 @@
   <style>
     .tournament-shell { max-width: 1120px; margin: 0 auto; padding: 24px 16px 48px; }
     .tournament-grid { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.4fr); gap: 18px; align-items: start; }
+    .tournament-grid > *, .tournament-list, .tournament-item, .tournament-detail { min-width: 0; }
+    .tournament-card { min-width: 0; }
     .tournament-card { background: var(--card-bg); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 20px; box-shadow: var(--shadow-sm); }
     .tournament-card h2 { margin-top: 0; }
     .tournament-field { display: grid; gap: 6px; margin: 14px 0; }
     .tournament-field input, .tournament-field select { width: 100%; min-height: 40px; }
-    .bot-checklist { display: grid; gap: 8px; max-height: 250px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); }
+    .bot-checklist { display: grid; gap: 8px; max-height: 300px; overflow: auto; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper); }
     .bot-option { display: flex; gap: 9px; align-items: center; }
     .bot-option input { width: auto; }
     .tournament-list { display: grid; gap: 12px; }
@@ -24,6 +26,44 @@
     .match-list { display: grid; gap: 7px; margin-top: 12px; }
     .match-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 9px; border-radius: var(--radius-sm); background: rgba(23,33,31,.045); }
     .match-row a { white-space: nowrap; }
+    /* Playoff bracket tree */
+    .bracket-viewport { margin: 4px 0 18px; border: 1px solid var(--line); border-radius: var(--radius-md); background: #f6f5f1; overflow: auto; max-height: 78vh; max-width: 100%; }
+    .bracket-shell { min-width: 0; }
+    .bracket-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 0 8px; }
+    .bracket-toolbar-title { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .bracket-toolbar-actions { display: flex; gap: 6px; }
+    .bracket-expand { border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 6px; padding: 5px 9px; font-size: 11px; cursor: pointer; }
+    .bracket-expand:hover { border-color: var(--green); color: var(--green); }
+    .bracket-shell:not(.is-expanded) .bracket-fit { display: none; }
+    .bracket-shell.is-expanded { position: fixed; inset: 14px; z-index: 10001; display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+    .bracket-shell.is-expanded .bracket-viewport { flex: 1; min-height: 0; max-height: none; margin: 0; }
+    body.bracket-modal-open { overflow: hidden; }
+    body.bracket-modal-open::before { content: ''; position: fixed; inset: 0; z-index: 10000; background: rgba(23,33,31,.38); }
+    .bracket-board { position: relative; min-width: 100%; background-image: radial-gradient(rgba(23,33,31,.055) 1px, transparent 1px); background-size: 18px 18px; }
+    .bracket-lines { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+    .bracket-lines path { fill: none; stroke: #c6ccc8; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+    .bracket-lines path.grand-final-line { stroke: #c6a64a; stroke-width: 1.7; }
+    .bracket-section-label { position: absolute; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--green); background: rgba(42,157,143,.09); white-space: nowrap; }
+    .bracket-section-label.lower { color: #9a6a11; background: rgba(243,156,18,.12); }
+    .bracket-col-header { position: absolute; width: 224px; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #79847f; line-height: 1.25; }
+    .bracket-col-header.grand-final { color: #9a7512; }
+    .bracket-match { position: absolute; width: 224px; height: 76px; box-sizing: border-box; overflow: hidden; border: 1px solid #d9d9d3; border-radius: 7px; background: #fff; box-shadow: 0 1px 2px rgba(23,33,31,.05); }
+    .bracket-match.is-champion { border-color: #c9a227; box-shadow: 0 0 0 2px rgba(201,162,39,.18), 0 2px 6px rgba(23,33,31,.08); }
+    .bracket-match.is-live { border-color: var(--green); box-shadow: 0 0 0 2px rgba(42,157,143,.13); }
+    .bracket-team { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 8px; border-bottom: 1px solid #efefeb; }
+    .bracket-team:nth-child(2) { border-bottom: 0; }
+    .bracket-team.is-winner { background: #e6f4e8; box-shadow: inset 3px 0 0 var(--green); }
+    .bracket-team.is-bye { color: #99a29e; background: #fafaf7; }
+    .bracket-avatar { display: grid; place-items: center; flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px; font-size: 9px; font-weight: 700; line-height: 1; }
+    .bracket-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--ink); }
+    .bracket-team.is-winner .bracket-name { font-weight: 700; color: #1d4d2a; }
+    .bracket-team.is-bye .bracket-name { font-style: italic; }
+    .bracket-score { flex: 0 0 auto; width: 14px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: #7a857f; }
+    .bracket-team.is-winner .bracket-score { color: #1f7a3a; font-weight: 700; }
+    .bracket-crown { font-size: 11px; line-height: 1; }
+    .bracket-footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 18px; padding: 0 8px; border-top: 1px solid #efefeb; background: #fbfbf9; font-size: 10px; color: #7a857f; }
+    .bracket-replay { color: var(--green); text-decoration: none; font-weight: 700; }
+    .bracket-replay:hover { text-decoration: underline; }
     .tournament-status { text-transform: uppercase; font-size: .75rem; letter-spacing: .08em; color: var(--green); }
     .champion { margin: 12px 0; padding: 12px; border-radius: var(--radius-sm); background: #fff4c2; color: #6b4e00; }
     @media (max-width: 760px) { .tournament-grid { grid-template-columns: 1fr; } }
@@ -40,19 +80,20 @@
     <section class="tournament-shell">
       <p class="eyebrow">GIẢI ĐẤU TRÍ TUỆ NHÂN TẠO</p>
       <h1>Giải đấu bot</h1>
-      <p class="muted">Chọn các bot để thi đấu vòng tròn hoặc loại trực tiếp. Với 12 bot, giải loại trực tiếp gồm vòng 1/8, tứ kết, bán kết và chung kết.</p>
+      <p class="muted">Swiss ghép các bot có số điểm gần nhau. Thể thức mặc định có 14 vòng Swiss và playoff top 32 khi đủ 10.000 bot: tổng cộng 70.062 trận. Máy chủ xử lý 2 trận cùng lúc theo mặc định. Bot tải lên cần Docker đang chạy trên máy chủ để được cô lập an toàn.</p>
       <div class="tournament-grid">
         <form id="create-form" class="tournament-card">
           <h2>Tạo giải đấu</h2>
           <div class="tournament-field">
             <strong>Tải bot của bạn lên</strong>
             <input id="bot-name" maxlength="60" placeholder="Tên bot (không bắt buộc)">
-            <input id="bot-file" type="file" accept=".py,text/x-python">
-            <button id="upload-bot" class="action-button alt" type="button">Tải bot Python lên</button>
+            <input id="bot-file" type="file" accept=".py,text/x-python" multiple>
+            <button id="upload-bot" class="action-button alt" type="button">Tải các bot Python lên</button>
+            <small class="muted">Có thể chọn nhiều file .py. Mỗi file tối đa 1 MB. Giải trên 20 bot yêu cầu tài khoản quản trị.</small>
             <small id="upload-status" class="muted" aria-live="polite"></small>
           </div>
           <button id="test-tournament" class="secondary-button" type="button">Chạy giải thử với bot mẫu</button>
-          <small class="muted">Bot được chọn sẽ đấu với Random và Minimax, đổi bên sau mỗi ván (6 trận).</small>
+          <small class="muted">Chạy thử bot đã chọn theo thể thức hiện tại cùng Random và Minimax.</small>
           <label class="tournament-field">Tên giải
             <input id="tournament-name" maxlength="60" placeholder="Giải Bot Cuối Tuần">
           </label>
@@ -63,14 +104,15 @@
           </label>
           <label class="tournament-field">Thể thức
             <select id="tournament-format">
-              <option value="single-elimination">Đấu loại trực tiếp</option>
-              <option value="round-robin-two-legs">Vòng tròn hai lượt</option>
+              <option value="swiss-playoff" selected>Swiss + top 32 playoff</option>
+              <option value="swiss">Swiss · chỉ xếp hạng</option>
+              <option value="round-robin-two-legs">Vòng tròn hai lượt · giải nhỏ</option>
             </select>
           </label>
           <label class="tournament-field">Giới hạn lượt mỗi trận
             <input id="max-turns" type="number" min="20" max="2000" value="300">
           </label>
-          <div class="tournament-field"><strong>Chọn từ 2 đến 12 bot</strong><div id="bot-list" class="bot-checklist">Đang tải danh sách bot…</div></div>
+          <div class="tournament-field"><strong>Chọn từ 2 đến 10.000 bot</strong><input id="bot-search" type="search" placeholder="Tìm bot theo tên"><div><button id="select-all-bots" class="secondary-button" type="button">Chọn tất cả bot trong bộ lọc</button> <span id="selected-bot-count" class="muted">0 bot đã chọn</span></div><div id="bot-list" class="bot-checklist">Đang tải danh sách bot…</div></div>
           <button class="primary-button" type="submit">Bắt đầu giải đấu</button>
           <p id="form-status" class="muted" aria-live="polite"></p>
         </form>
@@ -81,7 +123,7 @@
       </div>
       <section class="tournament-card" style="margin-top:18px">
         <h2>Giải cộng đồng</h2>
-        <p class="muted">Admin mở giải tối đa 12 tài khoản. Mỗi tài khoản được đăng ký đúng một bot Python để đấu loại trực tiếp.</p>
+        <p class="muted">Admin mở giải tối đa 20 tài khoản. Mỗi tài khoản đăng ký một bot Python; các bot thi đấu theo Swiss và không bị loại sau một trận thua.</p>
         <div id="community-list" class="tournament-list">Đang tải giải cộng đồng…</div>
       </section>
     </section>
@@ -93,11 +135,329 @@
     const uploadStatus = document.getElementById('upload-status');
     let selectedTournamentId = null;
     const expandedTournamentIds = new Set();
+    const tournamentDetailPages = new Map();
     const communityList = document.getElementById('community-list');
+    const selectedBotCount = document.getElementById('selected-bot-count');
 
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
     }
+
+    const BRACKET_CARD_WIDTH = 224;
+    const BRACKET_CARD_HEIGHT = 76;
+    const BRACKET_COLUMN_GAP = 58;
+    const BRACKET_PAD = 18;
+
+    function bracketInitials(name) {
+      const words = String(name || '?').trim().split(/[\s_.-]+/).filter(Boolean);
+      const text = words.length >= 2 ? `${words[0][0]}${words[1][0]}` : (words[0] || '?').slice(0, 2);
+      return text.toLocaleUpperCase('vi-VN');
+    }
+
+    function bracketAvatarStyle(name) {
+      let hash = 0;
+      for (const char of String(name || '?')) hash = ((hash * 31) + char.codePointAt(0)) >>> 0;
+      const hue = hash % 360;
+      return `background:hsl(${hue} 42% 88%);color:hsl(${hue} 46% 26%)`;
+    }
+
+    function bracketWinner(match, botId) {
+      return Boolean(botId && match.result && !match.result.draw && match.result.winnerBotId === botId);
+    }
+
+    function bracketScore(match, botId, bye) {
+      if (bye || !match.result) return '–';
+      if (match.result.draw) return '½';
+      if (!match.result.winnerBotId) return '–';
+      return match.result.winnerBotId === botId ? '1' : '0';
+    }
+
+    function bracketStatus(match) {
+      if (match.result?.bye) return 'Miễn đấu';
+      if (match.status === 'running') return 'Đang đấu…';
+      if (match.status === 'queued') return 'Chờ đấu';
+      if (match.status === 'completed') {
+        if (match.result?.draw) return 'Hòa';
+        return match.result?.turns ? `${match.result.turns} lượt` : 'Hoàn tất';
+      }
+      return match.status || '';
+    }
+
+    function bracketTeamRow(match, name, botId, champion) {
+      const bye = !botId || name === 'Bye';
+      const winner = !bye && bracketWinner(match, botId);
+      const label = bye ? 'BYE' : String(name || '?');
+      const avatar = bye ? '–' : bracketInitials(label);
+      return `<div class="bracket-team ${winner ? 'is-winner' : ''} ${bye ? 'is-bye' : ''}">
+        <span class="bracket-avatar" style="${bye ? 'background:#f0f0ec;color:#9aa39f' : bracketAvatarStyle(label)}" aria-hidden="true">${escapeHtml(avatar)}</span>
+        <span class="bracket-name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+        ${champion && winner ? '<span class="bracket-crown" title="Nhà vô địch">🏆</span>' : ''}
+        <span class="bracket-score">${bracketScore(match, botId, bye)}</span>
+      </div>`;
+    }
+
+    function bracketMatchCard(match, position, tournament) {
+      const isGrandFinal = match.stage === 'grand-final';
+      const isChampion = isGrandFinal && match.result?.winnerBotName && tournament.champion === match.result.winnerBotName;
+      const status = bracketStatus(match);
+      const replay = match.result?.replayFile
+        ? `<a class="bracket-replay" href="/replay.html?file=${encodeURIComponent(match.result.replayFile)}&autoplay=1" title="Phát lại trận ${escapeHtml(match.p1BotName)} vs ${escapeHtml(match.p2BotName)}">▶</a>`
+        : '';
+      const title = `${match.p1BotName || 'BYE'} vs ${match.p2BotName || 'BYE'} · ${status}`;
+      return `<article class="bracket-match ${isChampion ? 'is-champion' : ''} ${match.status === 'running' ? 'is-live' : ''}" data-match-id="${escapeHtml(match.id)}" style="left:${position.x}px;top:${position.y}px" title="${escapeHtml(title)}">
+        ${bracketTeamRow(match, match.p1BotName, match.p1BotId, isChampion)}
+        ${bracketTeamRow(match, match.p2BotName, match.p2BotId, isChampion)}
+        <div class="bracket-footer"><span>${escapeHtml(status)}</span>${replay}</div>
+      </article>`;
+    }
+
+    function bracketRounds(matches, stage) {
+      const rounds = new Map();
+      for (const match of matches) {
+        if (match.stage !== stage) continue;
+        if (!rounds.has(match.round)) rounds.set(match.round, []);
+        rounds.get(match.round).push(match);
+      }
+      return [...rounds.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([round, items]) => ({ round, matches: items }));
+    }
+
+    function bracketLayout(rounds, startY, rowGap) {
+      const layouts = [];
+      rounds.forEach((round, roundIndex) => {
+        const x = BRACKET_PAD + roundIndex * (BRACKET_CARD_WIDTH + BRACKET_COLUMN_GAP);
+        const previousMatches = rounds[roundIndex - 1]?.matches || [];
+        const previousLayout = layouts[roundIndex - 1] || [];
+        const previousByBot = new Map();
+        previousMatches.forEach((match, index) => {
+          if (match.p1BotId) previousByBot.set(match.p1BotId, index);
+          if (match.p2BotId) previousByBot.set(match.p2BotId, index);
+        });
+        const positions = round.matches.map((match, index) => {
+          let feeds = [];
+          if (roundIndex > 0) {
+            for (const botId of [match.p1BotId, match.p2BotId]) {
+              if (botId && previousByBot.has(botId)) feeds.push(previousByBot.get(botId));
+            }
+            feeds = [...new Set(feeds)];
+            if (!feeds.length) {
+              if (previousMatches.length === round.matches.length * 2) feeds = [index * 2, index * 2 + 1];
+              else if (previousMatches.length === round.matches.length) feeds = [index];
+              else if (previousMatches.length) feeds = [Math.min(index, previousMatches.length - 1)];
+            }
+          }
+          const feedYs = feeds.map(feedIndex => previousLayout[feedIndex]?.y).filter(value => Number.isFinite(value));
+          const y = roundIndex === 0
+            ? startY + index * (BRACKET_CARD_HEIGHT + rowGap)
+            : (feedYs.length ? feedYs.reduce((sum, value) => sum + value, 0) / feedYs.length : startY + index * (BRACKET_CARD_HEIGHT + rowGap));
+          return { match, x, y, feeds };
+        });
+        layouts.push(positions);
+      });
+      return layouts;
+    }
+
+    function bracketPath(from, to) {
+      const x1 = from.x + BRACKET_CARD_WIDTH;
+      const y1 = from.y + BRACKET_CARD_HEIGHT / 2;
+      const x2 = to.x;
+      const y2 = to.y + BRACKET_CARD_HEIGHT / 2;
+      if (x2 <= x1) return '';
+      if (Math.abs(y1 - y2) < 0.5) return `M ${x1} ${y1} H ${x2}`;
+      const midX = x1 + (x2 - x1) / 2;
+      return `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+    }
+
+    function upperRoundLabel(index, bracketSize) {
+      const teams = bracketSize / (2 ** index);
+      if (teams <= 2) return 'Chung kết nhánh thắng';
+      if (teams === 4) return 'Bán kết';
+      if (teams === 8) return 'Tứ kết';
+      return `Vòng 1/${teams / 2}`;
+    }
+
+    function lowerRoundLabel(index, total) {
+      return index === total - 1 ? 'Chung kết nhánh thua' : `Vòng ${index + 1}`;
+    }
+
+    function renderPlayoffBracket(tournament, matches) {
+      const winners = bracketRounds(matches, 'winners');
+      const losers = bracketRounds(matches, 'losers');
+      const grandFinal = bracketRounds(matches, 'grand-final');
+      const grandFinalMatch = grandFinal[0]?.matches?.[0] || null;
+      if (!winners.length && !losers.length && !grandFinalMatch) return '';
+
+      const firstRoundCount = Math.max(winners[0]?.matches.length || 0, losers[0]?.matches.length || 0);
+      const rowGap = firstRoundCount >= 12 ? 8 : firstRoundCount >= 6 ? 12 : 18;
+      const upperStart = BRACKET_PAD + 52;
+      const winnerLayouts = bracketLayout(winners, upperStart, rowGap);
+      const winnerBottom = winnerLayouts.flat().reduce((max, position) => Math.max(max, position.y + BRACKET_CARD_HEIGHT), 0);
+      const lowerStart = winners.length ? winnerBottom + 64 : BRACKET_PAD + 52;
+      const loserLayouts = bracketLayout(losers, lowerStart, rowGap);
+      const loserBottom = loserLayouts.flat().reduce((max, position) => Math.max(max, position.y + BRACKET_CARD_HEIGHT), 0);
+
+      const winnerPositions = winnerLayouts.flat();
+      const loserPositions = loserLayouts.flat();
+      const allPositions = [...winnerPositions, ...loserPositions];
+      const maxX = allPositions.reduce((max, position) => Math.max(max, position.x), BRACKET_PAD);
+      const winnerFinal = winnerPositions[winnerPositions.length - 1] || null;
+      const loserFinal = loserPositions[loserPositions.length - 1] || null;
+      let grandFinalPosition = null;
+      if (grandFinalMatch) {
+        const anchorCenters = [winnerFinal, loserFinal]
+          .filter(Boolean)
+          .map(position => position.y + BRACKET_CARD_HEIGHT / 2);
+        const centerY = anchorCenters.length
+          ? anchorCenters.reduce((sum, value) => sum + value, 0) / anchorCenters.length
+          : upperStart + BRACKET_CARD_HEIGHT / 2;
+        grandFinalPosition = {
+          match: grandFinalMatch,
+          x: maxX + BRACKET_CARD_WIDTH + BRACKET_COLUMN_GAP,
+          y: centerY - BRACKET_CARD_HEIGHT / 2
+        };
+      }
+
+      const headers = [];
+      const cards = [];
+      const paths = [];
+
+      winnerLayouts.forEach((positions, roundIndex) => {
+        const label = upperRoundLabel(roundIndex, 2 ** winners.length);
+        headers.push(`<div class="bracket-col-header" style="left:${positions[0].x}px;top:${upperStart - 26}px">${escapeHtml(label)}</div>`);
+        positions.forEach(position => {
+          cards.push(bracketMatchCard(position.match, position, tournament));
+          if (roundIndex === 0) return;
+          for (const feedIndex of position.feeds) {
+            const from = winnerLayouts[roundIndex - 1][feedIndex];
+            if (!from) continue;
+            const path = bracketPath(from, position);
+            if (path) paths.push(`<path d="${path}" />`);
+          }
+        });
+      });
+
+      loserLayouts.forEach((positions, roundIndex) => {
+        const label = lowerRoundLabel(roundIndex, losers.length);
+        headers.push(`<div class="bracket-col-header" style="left:${positions[0].x}px;top:${lowerStart - 26}px">${escapeHtml(label)}</div>`);
+        positions.forEach(position => {
+          cards.push(bracketMatchCard(position.match, position, tournament));
+          if (roundIndex === 0) return;
+          for (const feedIndex of position.feeds) {
+            const from = loserLayouts[roundIndex - 1][feedIndex];
+            if (!from) continue;
+            const path = bracketPath(from, position);
+            if (path) paths.push(`<path d="${path}" />`);
+          }
+        });
+      });
+
+      if (grandFinalPosition) {
+        headers.push(`<div class="bracket-col-header grand-final" style="left:${grandFinalPosition.x}px;top:${grandFinalPosition.y - 26}px">Chung kết tổng</div>`);
+        cards.push(bracketMatchCard(grandFinalMatch, grandFinalPosition, tournament));
+        for (const from of [winnerFinal, loserFinal]) {
+          if (!from) continue;
+          const path = bracketPath(from, grandFinalPosition);
+          if (path) paths.push(`<path class="grand-final-line" d="${path}" />`);
+        }
+      }
+
+      const bottom = Math.max(winnerBottom, loserBottom, grandFinalPosition ? grandFinalPosition.y + BRACKET_CARD_HEIGHT : 0, upperStart + BRACKET_CARD_HEIGHT);
+      const width = (grandFinalPosition ? grandFinalPosition.x : maxX) + BRACKET_CARD_WIDTH + BRACKET_PAD;
+      const sectionLabels = [
+        winners.length ? `<div class="bracket-section-label" style="left:${BRACKET_PAD}px;top:${BRACKET_PAD}px">Nhánh thắng</div>` : '',
+        losers.length ? `<div class="bracket-section-label lower" style="left:${BRACKET_PAD}px;top:${lowerStart - 50}px">Nhánh thua</div>` : ''
+      ].join('');
+      return `<div class="bracket-shell">
+        <div class="bracket-toolbar"><span class="bracket-toolbar-title">Sơ đồ playoff</span><div class="bracket-toolbar-actions"><button type="button" class="bracket-expand bracket-fit" data-bracket-fit aria-pressed="false">⤢ Vừa khung</button><button type="button" class="bracket-expand" data-bracket-expand aria-expanded="false">⛶ Mở rộng</button></div></div>
+        <div class="bracket-viewport" role="region" aria-label="Sơ đồ nhánh playoff"><div class="bracket-board" data-bracket-width="${width}" data-bracket-height="${bottom + BRACKET_PAD}" style="width:${width}px;height:${bottom + BRACKET_PAD}px">
+          ${sectionLabels}
+          <svg class="bracket-lines" width="${width}" height="${bottom + BRACKET_PAD}" viewBox="0 0 ${width} ${bottom + BRACKET_PAD}" aria-hidden="true">${paths.join('')}</svg>
+          ${headers.join('')}
+          ${cards.join('')}
+        </div></div>
+      </div>`;
+    }
+
+    function resetBracketZoom(shell) {
+      const board = shell?.querySelector('.bracket-board');
+      if (board) board.style.zoom = '';
+      const button = shell?.querySelector('[data-bracket-fit]');
+      if (button) {
+        button.textContent = '⤢ Vừa khung';
+        button.setAttribute('aria-pressed', 'false');
+      }
+    }
+
+    function fitBracketToViewport(shell) {
+      const board = shell.querySelector('.bracket-board');
+      const viewport = shell.querySelector('.bracket-viewport');
+      const button = shell.querySelector('[data-bracket-fit]');
+      if (!board || !viewport) return;
+      if (board.style.zoom) {
+        resetBracketZoom(shell);
+        return;
+      }
+      const width = Number(board.dataset.bracketWidth) || board.offsetWidth;
+      const height = Number(board.dataset.bracketHeight) || board.offsetHeight;
+      if (!width || !height) return;
+      const scale = Math.min(1, (viewport.clientWidth - 4) / width, (viewport.clientHeight - 4) / height);
+      board.style.zoom = String(Math.max(0.2, scale));
+      if (button) {
+        button.textContent = '↺ 100%';
+        button.setAttribute('aria-pressed', 'true');
+      }
+    }
+
+    function closeBracket() {
+      const shell = document.querySelector('.bracket-shell.is-expanded');
+      if (shell) {
+        shell.classList.remove('is-expanded');
+        resetBracketZoom(shell);
+        const button = shell.querySelector('[data-bracket-expand]');
+        if (button) {
+          button.textContent = '⛶ Mở rộng';
+          button.setAttribute('aria-expanded', 'false');
+        }
+      }
+      document.body.classList.remove('bracket-modal-open');
+    }
+
+    document.addEventListener('click', event => {
+      const fitButton = event.target.closest?.('[data-bracket-fit]');
+      if (fitButton) {
+        fitBracketToViewport(fitButton.closest('.bracket-shell'));
+        return;
+      }
+      const button = event.target.closest?.('[data-bracket-expand]');
+      if (button) {
+        const shell = button.closest('.bracket-shell');
+        const willExpand = !shell.classList.contains('is-expanded');
+        closeBracket();
+        if (willExpand) {
+          shell.classList.add('is-expanded');
+          document.body.classList.add('bracket-modal-open');
+          resetBracketZoom(shell);
+          button.textContent = '✕ Đóng';
+          button.setAttribute('aria-expanded', 'true');
+          const viewport = shell.querySelector('.bracket-viewport');
+          if (viewport) {
+            viewport.scrollLeft = 0;
+            viewport.scrollTop = 0;
+          }
+        }
+        return;
+      }
+      if (document.body.classList.contains('bracket-modal-open') && !event.target.closest?.('.bracket-shell')) closeBracket();
+    });
+    document.addEventListener('keydown', event => { if (event.key === 'Escape') closeBracket(); });
+    window.addEventListener('resize', () => {
+      const shell = document.querySelector('.bracket-shell.is-expanded');
+      const button = shell?.querySelector('[data-bracket-fit][aria-pressed="true"]');
+      if (!shell || !button) return;
+      resetBracketZoom(shell);
+      fitBracketToViewport(shell);
+    });
 
     async function loadBots() {
       const response = await fetch('/api/bots');
@@ -114,27 +474,59 @@
         checkbox.dataset.botName = bot.name;
         const name = document.createElement('span');
         name.textContent = `${bot.name}${bot.builtin ? ' · bot có sẵn' : ''}`;
+        label.dataset.search = bot.name.toLocaleLowerCase();
+        checkbox.addEventListener('change', updateSelectedBotCount);
         label.append(checkbox, name);
         botList.append(label);
       }
       if (!bots.length) botList.textContent = 'Hãy tải bot lên từ hộp thoại Bot đấu Bot ở sảnh trước.';
+      updateSelectedBotCount();
     }
 
+    function updateSelectedBotCount() {
+      selectedBotCount.textContent = `${botList.querySelectorAll('input[name="bot"]:checked').length.toLocaleString('vi-VN')} bot đã chọn`;
+    }
+
+    document.getElementById('bot-search').addEventListener('input', event => {
+      const query = event.target.value.trim().toLocaleLowerCase();
+      for (const option of botList.querySelectorAll('.bot-option')) option.hidden = !option.dataset.search.includes(query);
+    });
+    function toggleSelectAll() {
+      const visible = [...botList.querySelectorAll('.bot-option:not([hidden]) input[name="bot"]')];
+      const allChecked = visible.length > 0 && visible.every(option => option.checked);
+      if (allChecked) {
+        for (const option of botList.querySelectorAll('input[name="bot"]')) option.checked = false;
+      } else {
+        let selected = botList.querySelectorAll('input[name="bot"]:checked').length;
+        for (const option of visible) {
+          if (!option.checked && selected >= 10000) break;
+          if (!option.checked) selected++;
+          option.checked = true;
+        }
+      }
+      updateSelectedBotCount();
+      updateSelectAllLabel();
+    }
+    function updateSelectAllLabel() {
+      const button = document.getElementById('select-all-bots');
+      const visible = [...botList.querySelectorAll('.bot-option:not([hidden]) input[name="bot"]')];
+      const allChecked = visible.length > 0 && visible.every(option => option.checked);
+      button.textContent = allChecked ? 'Bỏ chọn tất cả bot trong bộ lọc' : 'Chọn tất cả bot trong bộ lọc';
+    }
+    document.getElementById('select-all-bots').addEventListener('click', toggleSelectAll);
+    const originalUpdateSelectedBotCount = updateSelectedBotCount;
+    updateSelectedBotCount = function() {
+      originalUpdateSelectedBotCount();
+      updateSelectAllLabel();
+    };
+
     function renderTournament(tournament) {
-      const standings = tournament.standings || [];
-      const rows = standings.map((row, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(row.name)}</td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td><strong>${row.points}</strong></td></tr>`).join('');
-      const matches = tournament.matches || [];
-      const statusLabels = { queued: 'Đang chờ', running: 'Đang đấu', completed: 'Đã xong' };
-      const matchRows = matches.map(match => {
-        const result = match.result;
-        const winner = result?.winnerBotName ? ` · ${escapeHtml(result.winnerBotName)} thắng` : result?.draw ? ' · Hòa' : '';
-        const replay = result?.replayFile ? `<a href="/replay.html?file=${encodeURIComponent(result.replayFile)}&autoplay=1">▶ Phát lại</a>` : '';
-        return `<div class="match-row"><span>${escapeHtml(match.p1BotName)} vs ${escapeHtml(match.p2BotName)} <small class="muted">${statusLabels[match.status] || escapeHtml(match.status)}${winner}</small></span>${replay}</div>`;
-      }).join('');
-      const progress = `${tournament.completedMatches ?? matches.filter(match => match.status === 'completed').length}/${tournament.matchCount ?? matches.length} trận`;
-      const tournamentStatus = { queued: 'Sẵn sàng', running: 'Đang diễn ra', completed: 'Hoàn tất', failed: 'Gặp lỗi' }[tournament.status] || tournament.status;
+      const progress = `${(tournament.completedMatches || 0).toLocaleString('vi-VN')}/${(tournament.matchCount || 0).toLocaleString('vi-VN')} trận`;
+      const tournamentStatus = { queued: 'Sẵn sàng', running: 'Đang diễn ra', completed: 'Hoàn tất', failed: 'Gặp lỗi', paused: 'Tạm dừng', cancelled: 'Đã hủy' }[tournament.status] || tournament.status;
       const modeLabels = { classic: '3v3 Nhanh', tactical: '6v6 Chiến thuật', army: '9v9 Đại chiến' };
-      const formatLabel = tournament.format === 'single-elimination' ? 'Loại trực tiếp' : 'Vòng tròn hai lượt';
+      const formatLabel = tournament.format === 'swiss' || tournament.format === 'swiss-playoff'
+        ? `${tournament.format === 'swiss-playoff' ? 'Swiss + top 32 playoff' : 'Swiss'} · vòng ${Math.min(tournament.currentRound || 1, tournament.totalRounds || 1)}/${tournament.totalRounds || 1}${tournament.format === 'swiss-playoff' && tournament.currentRound > tournament.totalRounds ? ` · playoff ${tournament.currentRound - tournament.totalRounds}` : ''}`
+        : tournament.format === 'single-elimination' ? 'Loại trực tiếp' : 'Vòng tròn hai lượt';
       const champion = tournament.champion ? `<div class="champion">🏆 Nhà vô địch: <strong>${escapeHtml(tournament.champion)}</strong></div>` : '';
       return `<article class="tournament-item" data-tournament-id="${escapeHtml(tournament.id)}">
         <div class="tournament-status">${escapeHtml(tournamentStatus)} · ${progress}</div>
@@ -142,9 +534,127 @@
         <div class="tournament-meta">${modeLabels[tournament.mode] || escapeHtml(tournament.mode)} · ${formatLabel} · ${new Date(tournament.createdAt).toLocaleString('vi-VN')}</div>
         ${champion}
         ${tournament.error ? `<p class="muted">${escapeHtml(tournament.error)}</p>` : ''}
-        <table class="standings"><thead><tr><th>Hạng</th><th>Bot</th><th>Trận</th><th>Thắng</th><th>Hòa</th><th>Thua</th><th>Điểm</th></tr></thead><tbody>${rows}</tbody></table>
-        <details ${expandedTournamentIds.has(tournament.id) ? 'open' : ''}><summary>Lịch đấu và replay</summary><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div></details>
+        ${tournament.format === 'swiss-playoff' && tournament.currentRound > tournament.totalRounds ? '<p><strong>Vòng playoff top 32</strong></p>' : ''}
+        <div class="tournament-actions" style="display:flex;gap:6px;margin-top:8px">
+          ${tournament.status === 'running' ? `<button class="secondary-button" data-action="pause" data-id="${escapeHtml(tournament.id)}">Tạm dừng</button>` : ''}
+          ${tournament.status === 'paused' ? `<button class="primary-button" data-action="resume" data-id="${escapeHtml(tournament.id)}">Tiếp tục</button>` : ''}
+          ${tournament.status !== 'completed' && tournament.status !== 'cancelled' ? `<button class="secondary-button" data-action="cancel" data-id="${escapeHtml(tournament.id)}">Hủy</button>` : ''}
+        </div>
+        <details ${expandedTournamentIds.has(tournament.id) ? 'open' : ''}><summary>Xếp hạng, nhánh đấu và replay</summary><div class="tournament-detail muted">Mở để tải thông tin giải…</div></details>
       </article>`;
+    }
+
+    async function loadTournamentDetail(id, container, pages = {}) {
+      const previous = tournamentDetailPages.get(id) || { standingsOffset: 0, matchOffset: 0, matchStage: 'all', matchRound: 'all' };
+      const state = { ...previous, ...pages };
+      tournamentDetailPages.set(id, state);
+      const qs = new URLSearchParams({ standingsOffset: state.standingsOffset || 0, standingsLimit: 50, matchOffset: state.matchOffset || 0, matchLimit: 50, matchStage: state.matchStage === 'all' ? 'all' : state.matchStage, ...(state.matchRound === 'all' ? {} : { matchRound: state.matchRound }) });
+      container.textContent = 'Đang tải xếp hạng và trận đấu…';
+      try {
+        const response = await fetch(`/api/tournaments/${encodeURIComponent(id)}?${qs}`);
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Không tải được chi tiết giải.');
+        const tournament = payload.tournament;
+        const rows = tournament.standings.map((row, index) => `<tr><td>${tournament.standingsOffset + index + 1}</td><td>${escapeHtml(row.name)}</td><td>${row.played}</td><td>${row.wins}</td><td>${row.draws}</td><td>${row.losses}</td><td>${row.byes || 0}</td><td><strong>${row.points}</strong></td><td>${row.buchholz ?? 0}</td><td>${row.headToHeadPoints ?? 0}</td></tr>`).join('');
+        const matchRows = tournament.matches.map(match => {
+          const result = match.result;
+          const winner = result?.bye ? ' · Miễn đấu (+1 điểm)' : result?.winnerBotName ? ` · ${escapeHtml(result.winnerBotName)} thắng` : result?.draw ? ' · Hòa' : '';
+          const replay = result?.replayFile ? `<a href="/replay.html?file=${encodeURIComponent(result.replayFile)}&autoplay=1">▶ Phát lại</a>` : '';
+          const matchup = match.p2BotId ? `${escapeHtml(match.p1BotName)} vs ${escapeHtml(match.p2BotName)}` : `${escapeHtml(match.p1BotName)} · miễn đấu`;
+          const stage = match.stage === 'playoff' ? 'Playoff' : (match.stage === 'winners' ? 'Nhánh thắng' : (match.stage === 'losers' ? 'Nhánh thua' : (match.stage === 'grand-final' ? 'Chung kết tổng' : 'Swiss')));
+          return `<div class="match-row"><span>${matchup} <small class="muted">${stage} · vòng ${match.round} · ${escapeHtml(match.status)}${winner}</small></span>${replay}</div>`;
+        }).join('');
+        let allPlayoffMatches = Array.isArray(tournament.bracketMatches) ? tournament.bracketMatches : [];
+        if (!allPlayoffMatches.length) {
+          const allPlayoffResponse = await fetch(`/api/tournaments/${encodeURIComponent(id)}?matchStage=playoff&matchLimit=100&standingsLimit=1`);
+          const allPlayoffPayload = allPlayoffResponse.ok ? await allPlayoffResponse.json() : null;
+          allPlayoffMatches = allPlayoffPayload?.tournament?.matches || [];
+        }
+        const bracket = renderPlayoffBracket(tournament, allPlayoffMatches);
+        const winnersRounds = bracketRounds(allPlayoffMatches, 'winners');
+        const losersRounds = bracketRounds(allPlayoffMatches, 'losers');
+        const playoffRoundEntries = [];
+        winnersRounds.forEach((entry, index) => {
+          playoffRoundEntries.push({ key: `playoff:${entry.round}`, label: `Nhánh thắng · ${upperRoundLabel(index, 2 ** winnersRounds.length)}` });
+        });
+        losersRounds.forEach((entry, index) => {
+          playoffRoundEntries.push({ key: `playoff:${entry.round}`, label: `Nhánh thua · ${lowerRoundLabel(index, losersRounds.length)}` });
+        });
+        bracketRounds(allPlayoffMatches, 'grand-final').forEach(entry => {
+          playoffRoundEntries.push({ key: `playoff:${entry.round}`, label: 'Chung kết tổng' });
+        });
+        playoffRoundEntries.sort((a, b) => Number(a.key.split(':')[1]) - Number(b.key.split(':')[1]));
+        const matchFilters = ['<option value="all">Tất cả vòng</option>', ...Array.from({ length: tournament.totalRounds || 0 }, (_, index) => `<option value="swiss:${index + 1}">Swiss · vòng ${index + 1}</option>`), ...playoffRoundEntries.map(entry => `<option value="${entry.key}">${escapeHtml(entry.label)}</option>`)].join('');
+        const roundTimeline = [...Array.from({ length: tournament.totalRounds || 0 }, (_, index) => ({ key: `swiss:${index + 1}`, label: `Vòng ${index + 1}` })), ...playoffRoundEntries];
+        const standPrev = tournament.standingsOffset > 0 ? `<button data-page="standings" data-offset="${Math.max(0, tournament.standingsOffset - 50)}">Xếp hạng trước</button>` : '';
+        const standNext = tournament.standingsOffset + 50 < tournament.standingsTotal ? `<button data-page="standings" data-offset="${tournament.standingsOffset + 50}">Xếp hạng sau</button>` : '';
+        const matchPrev = tournament.matchOffset > 0 ? `<button data-page="matches" data-offset="${Math.max(0, tournament.matchOffset - 50)}">Trận trước</button>` : '';
+        const matchNext = tournament.matchOffset + 50 < tournament.matchesTotal ? `<button data-page="matches" data-offset="${tournament.matchOffset + 50}">Trận sau</button>` : '';
+        const selectedFilter = state.matchStage === 'all' ? 'all' : `${state.matchStage}:${state.matchRound}`;
+        container.innerHTML = `${bracket ? `<div style="margin-bottom:14px">${bracket}</div>` : ''}<div class="round-timeline" style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">${roundTimeline.map(item => `<button type="button" data-round-key="${item.key}" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:${selectedFilter === item.key ? 'var(--accent,#e76f51)' : 'var(--paper)'};color:${selectedFilter === item.key ? '#fff' : 'inherit'};cursor:pointer">${item.label}</button>`).join('')}<button type="button" data-round-key="all" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:${selectedFilter === 'all' ? 'var(--accent,#e76f51)' : 'var(--paper)'};color:${selectedFilter === 'all' ? '#fff' : 'inherit'};cursor:pointer">Tất cả</button></div><div style="overflow-x:auto"><table class="standings"><thead><tr><th>Hạng</th><th>Bot</th><th>Trận</th><th>Thắng</th><th>Hòa</th><th>Thua</th><th>Miễn đấu</th><th>Điểm</th><th>Buchholz</th><th>Đối đầu</th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted">Hạng ${tournament.standingsOffset + 1}–${Math.min(tournament.standingsOffset + 50, tournament.standingsTotal)} / ${tournament.standingsTotal.toLocaleString('vi-VN')} ${standPrev} ${standNext}</p><h4>Lịch đấu và replay</h4><label class="muted">Vòng <select data-match-filter>${matchFilters}</select></label><div class="match-list">${matchRows || '<span class="muted">Chưa có trận đấu.</span>'}</div><p class="muted">Trận ${tournament.matchesTotal ? tournament.matchOffset + 1 : 0}–${Math.min(tournament.matchOffset + 50, tournament.matchesTotal)} / ${tournament.matchesTotal.toLocaleString('vi-VN')} ${matchPrev} ${matchNext}</p>`;
+        const filter = container.querySelector('[data-match-filter]');
+        filter.value = selectedFilter;
+        filter.addEventListener('change', () => {
+          const [stage, round] = filter.value === 'all' ? ['all', 'all'] : filter.value.split(':');
+          loadTournamentDetail(id, container, { matchStage: stage, matchRound: round, matchOffset: 0 });
+        });
+        container.querySelectorAll('[data-round-key]').forEach(button => button.addEventListener('click', () => {
+          const value = button.dataset.roundKey;
+          const [stage, round] = value === 'all' ? ['all', 'all'] : value.split(':');
+          loadTournamentDetail(id, container, { matchStage: stage, matchRound: round, matchOffset: 0, standingsOffset: tournament.standingsOffset });
+        }));
+        container.querySelectorAll('button[data-page]').forEach(button => button.addEventListener('click', () => {
+          const page = button.dataset.page;
+          loadTournamentDetail(id, container, { standingsOffset: page === 'standings' ? button.dataset.offset : tournament.standingsOffset, matchOffset: page === 'matches' ? button.dataset.offset : tournament.matchOffset, matchStage: state.matchStage, matchRound: state.matchRound });
+        }));
+      } catch (error) { container.textContent = error.message; }
+    }
+
+    async function loadCommunityTournaments() {
+      const response = await fetch('/api/community-tournaments');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
+      communityList.innerHTML = data.tournaments.length ? data.tournaments.map(event => {
+        const registered = event.players.map(player => `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName)}</li>`).join('');
+        const canJoin = event.status === 'registration' && event.players.length < event.maxPlayers;
+        const roundProgress = event.totalRounds ? ` · vòng ${event.currentRound}/${event.totalRounds}` : '';
+        const matchProgress = event.matchCount ? ` · ${event.completedMatches}/${event.matchCount} trận` : '';
+        return `<article class="tournament-item">
+          <div class="tournament-status">${escapeHtml(event.status)} · ${event.players.length}/${event.maxPlayers} người${roundProgress}${matchProgress}</div>
+          <h3>${escapeHtml(event.name)}</h3>
+          <div class="tournament-meta">${event.format === 'single-elimination' ? 'Loại trực tiếp' : event.format === 'round-robin-two-legs' ? 'Vòng tròn hai lượt' : 'Swiss'} · tối đa ${event.maxTurns} lượt/trận</div>
+          ${event.error ? `<p class="muted">${escapeHtml(event.error)}</p>` : ''}
+          <ul>${registered || '<li class="muted">Chưa có người đăng ký.</li>'}</ul>
+          ${event.champion ? `<div class="champion">🏆 Nhà vô địch: <strong>${escapeHtml(event.champion)}</strong></div>` : ''}
+          ${canJoin ? `<form class="community-register" data-event-id="${escapeHtml(event.id)}">
+            <input name="name" maxlength="60" placeholder="Tên bot của bạn" required>
+            <input name="file" type="file" accept=".py,text/x-python" required>
+            <button class="primary-button">Đăng ký bot</button>
+            <small class="muted" data-status></small>
+          </form>` : ''}
+        </article>`;
+      }).join('') : '<p class="muted">Chưa có giải cộng đồng nào.</p>';
+      document.querySelectorAll('.community-register').forEach(form => form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const file = form.elements.file.files[0];
+        const status = form.querySelector('[data-status]');
+        if (!file || !file.name.toLowerCase().endsWith('.py')) {
+          status.textContent = 'Hãy chọn file Python .py.';
+          return;
+        }
+        if (file.size > 256 * 1024) {
+          status.textContent = 'File bot tối đa 256 KB.';
+          return;
+        }
+        status.textContent = 'Đang đăng ký…';
+        const response = await fetch(`/api/community-tournaments/${form.dataset.eventId}/register`, {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ name: form.elements.name.value, filename: file.name, source: await file.text() })
+        });
+        const result = await response.json();
+        status.textContent = result.error || 'Đăng ký thành công.';
+        if (response.ok) loadCommunityTournaments();
+      }));
     }
 
     async function loadTournaments() {
@@ -156,49 +666,6 @@
         return;
       }
 
-      async function loadCommunityTournaments() {
-        const response = await fetch('/api/community-tournaments');
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
-        communityList.innerHTML = data.tournaments.length ? data.tournaments.map(event => {
-          const registered = event.players.map(player => `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName)}</li>`).join('');
-          const canJoin = event.status === 'registration' && event.players.length < 12;
-          return `<article class="tournament-item">
-            <div class="tournament-status">${escapeHtml(event.status)} · ${event.players.length}/12 người</div>
-            <h3>${escapeHtml(event.name)}</h3>
-            <div class="tournament-meta">Đấu loại trực tiếp · tối đa ${event.maxTurns} lượt/trận</div>
-            <ul>${registered || '<li class="muted">Chưa có người đăng ký.</li>'}</ul>
-            ${event.champion ? `<div class="champion">🏆 Nhà vô địch: <strong>${escapeHtml(event.champion)}</strong></div>` : ''}
-            ${canJoin ? `<form class="community-register" data-event-id="${escapeHtml(event.id)}">
-              <input name="name" maxlength="60" placeholder="Tên bot của bạn" required>
-              <input name="file" type="file" accept=".py,text/x-python" required>
-              <button class="primary-button">Đăng ký bot</button>
-              <small class="muted" data-status></small>
-            </form>` : ''}
-          </article>`;
-        }).join('') : '<p class="muted">Chưa có giải cộng đồng nào.</p>';
-        document.querySelectorAll('.community-register').forEach(form => form.addEventListener('submit', async event => {
-          event.preventDefault();
-          const file = form.elements.file.files[0];
-          const status = form.querySelector('[data-status]');
-          if (!file || !file.name.toLowerCase().endsWith('.py')) {
-            status.textContent = 'Hãy chọn file Python .py.';
-            return;
-          }
-          if (file.size > 256 * 1024) {
-            status.textContent = 'File bot tối đa 256 KB.';
-            return;
-          }
-          status.textContent = 'Đang đăng ký…';
-          const response = await fetch(`/api/community-tournaments/${form.dataset.eventId}/register`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ name: form.elements.name.value, filename: file.name, source: await file.text() })
-          });
-          const result = await response.json();
-          status.textContent = result.error || 'Đăng ký thành công.';
-          if (response.ok) loadCommunityTournaments();
-        }));
-      }
       const selected = selectedTournamentId && tournaments.find(item => item.id === selectedTournamentId);
       const ids = selected ? [selected, ...tournaments.filter(item => item.id !== selectedTournamentId)] : tournaments;
       for (const item of tournamentList.querySelectorAll('.tournament-item')) {
@@ -207,6 +674,30 @@
         else expandedTournamentIds.delete(id);
       }
       tournamentList.innerHTML = ids.map(renderTournament).join('');
+      closeBracket();
+      tournamentList.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
+        const id = button.dataset.id;
+        const action = button.dataset.action;
+        try {
+          await fetch(`/api/tournaments/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
+          await loadTournaments();
+        } catch (error) { /* ignore */ }
+      }));
+      tournamentList.querySelectorAll('.tournament-item details').forEach(details => {
+        details.addEventListener('toggle', () => {
+          const item = details.closest('.tournament-item');
+          const id = item.dataset.tournamentId;
+          const container = details.querySelector('.tournament-detail');
+          if (details.open) {
+            expandedTournamentIds.add(id);
+            loadTournamentDetail(id, container);
+          } else {
+            expandedTournamentIds.delete(id);
+            closeBracket();
+          }
+        });
+        if (details.open) loadTournamentDetail(details.closest('.tournament-item').dataset.tournamentId, details.querySelector('.tournament-detail'));
+      });
     }
 
     async function createTournament(botIds, name) {
@@ -226,7 +717,7 @@
         if (!response.ok) throw new Error(data.error || 'Không thể tạo giải đấu.');
         selectedTournamentId = data.tournament.id;
         expandedTournamentIds.add(data.tournament.id);
-        formStatus.textContent = 'Giải đã bắt đầu. Các trận lần lượt được tự động thi đấu.';
+        formStatus.textContent = 'Giải đã bắt đầu. Các trận của vòng hiện tại đang được chạy.';
         await loadTournaments();
       } catch (error) {
         formStatus.textContent = error.message;
@@ -236,8 +727,8 @@
     document.getElementById('create-form').addEventListener('submit', event => {
       event.preventDefault();
       const botIds = [...botList.querySelectorAll('input[name="bot"]:checked')].map(input => input.value);
-      if (botIds.length < 2 || botIds.length > 12) {
-        formStatus.textContent = 'Hãy chọn từ 2 đến 12 bot.';
+      if (botIds.length < 2 || botIds.length > 10000) {
+        formStatus.textContent = 'Hãy chọn từ 2 đến 10.000 bot.';
         return;
       }
       createTournament(botIds);
@@ -245,33 +736,53 @@
 
     document.getElementById('upload-bot').addEventListener('click', async () => {
       const input = document.getElementById('bot-file');
-      const file = input.files[0];
-      if (!file) {
+      const files = [...input.files];
+      if (!files.length) {
         uploadStatus.textContent = 'Hãy chọn tệp Python .py trước.';
         return;
       }
-      if (!file.name.toLowerCase().endsWith('.py')) {
-        uploadStatus.textContent = 'Chỉ chấp nhận tệp Python .py.';
+      if (files.some(file => !file.name.toLowerCase().endsWith('.py'))) {
+        uploadStatus.textContent = 'Chỉ chấp nhận các tệp Python .py.';
         return;
       }
-      if (file.size > 256 * 1024) {
-        uploadStatus.textContent = 'Tệp bot tối đa 256 KB.';
+      if (files.some(file => file.size > 1024 * 1024)) {
+        uploadStatus.textContent = 'Mỗi tệp bot tối đa 1 MB.';
         return;
       }
-      uploadStatus.textContent = 'Đang tải bot lên…';
+      let completed = 0;
+      let failed = [];
+      const uploadedIds = [];
+      uploadStatus.textContent = `Đang tải ${files.length.toLocaleString('vi-VN')} bot lên…`;
       try {
-        const response = await fetch('/api/bots', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, name: document.getElementById('bot-name').value, source: await file.text() })
+        let next = 0;
+        const workers = Array.from({ length: Math.min(6, files.length) }, async () => {
+          while (next < files.length) {
+            const index = next++;
+            const file = files[index];
+            try {
+              const response = await fetch('/api/bots', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: file.name, name: files.length === 1 ? document.getElementById('bot-name').value : '', source: await file.text() })
+              });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Tải bot lên thất bại.');
+              uploadedIds.push(data.bot.id);
+            } catch (error) { failed.push(`${file.name}: ${error.message}`); }
+            completed++;
+            uploadStatus.textContent = `Đã tải ${completed.toLocaleString('vi-VN')}/${files.length.toLocaleString('vi-VN')}${failed.length ? ` · lỗi ${failed.length}` : ''}`;
+          }
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Tải bot lên thất bại.');
+        await Promise.all(workers);
         await loadBots();
-        const uploaded = [...botList.querySelectorAll('input[name="bot"]')].find(option => option.value === data.bot.id);
-        if (uploaded) uploaded.checked = true;
+        const inputs = [...botList.querySelectorAll('input[name="bot"]')];
+        const uploadedIdSet = new Set(uploadedIds);
+        for (const checkbox of inputs) if (uploadedIdSet.has(checkbox.value)) checkbox.checked = true;
+        updateSelectedBotCount();
         document.getElementById('bot-name').value = '';
         input.value = '';
-        uploadStatus.textContent = `Đã tải ${data.bot.name}. Bot đã được chọn cho giải đấu.`;
+        uploadStatus.textContent = failed.length
+          ? `Đã tải ${files.length - failed.length}/${files.length} bot. ${failed.slice(0, 3).join(' · ')}`
+          : `Đã tải và chọn ${files.length.toLocaleString('vi-VN')} bot.`;
       } catch (error) {
         uploadStatus.textContent = error.message;
       }
@@ -292,9 +803,9 @@
     loadTournaments().catch(error => { tournamentList.textContent = error.message; });
     loadCommunityTournaments().catch(error => { communityList.textContent = error.message; });
     setInterval(() => {
-      loadTournaments().catch(() => {});
+      if (!document.body.classList.contains('bracket-modal-open') && !document.querySelector('.tournament-item details[open]')) loadTournaments().catch(() => {});
       loadCommunityTournaments().catch(() => {});
-    }, 2500);
+    }, 10000);
   </script>
 </body>
 </html>

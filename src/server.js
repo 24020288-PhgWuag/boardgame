@@ -3,6 +3,7 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
@@ -17,7 +18,7 @@ const CommunityTournamentManager = require('./communityTournamentManager');
 const matchResultSheets = require('./matchResultSheets');
 
 const app = express();
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '16mb' }));
 app.use('/api/match-results', matchResultSheets.router);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -79,6 +80,10 @@ function getUploadedBot(botId) {
   return fs.existsSync(filePath) ? filePath : null;
 }
 
+function sandboxEnabled() {
+  return process.env.BOT_SANDBOX !== 'false' && process.env.BOT_SANDBOX !== '0';
+}
+
 function getBotDefinition(botId) {
   let script = null;
   let name = null;
@@ -95,12 +100,12 @@ function getBotDefinition(botId) {
     const metadata = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     name = metadata.name;
     sha256 = metadata.sha256;
-    untrusted = true;
+    untrusted = sandboxEnabled();
   } else {
     script = getUploadedBot(botId);
     if (!script) return null;
     name = getBotDisplayName(botId);
-    untrusted = true;
+    untrusted = sandboxEnabled();
   }
   if (!fs.existsSync(script)) return null;
   sha256 ||= crypto.createHash('sha256').update(fs.readFileSync(script)).digest('hex');
@@ -110,6 +115,8 @@ function getBotDefinition(botId) {
 const tournaments = new TournamentManager(TOURNAMENT_DIR, {
   resolveBot: getBotDefinition,
   runMatch,
+  maxBots: 10_000,
+  maxConcurrentMatches: Number(process.env.TOURNAMENT_CONCURRENCY) || 2,
   onMatchComplete: recordMatchResult
 });
 const communityTournaments = new CommunityTournamentManager(
@@ -120,7 +127,7 @@ const communityTournaments = new CommunityTournamentManager(
       botIds: event.players.map(player => player.botId),
       mode: event.mode,
       maxTurns: event.maxTurns,
-      format: 'single-elimination'
+      format: 'swiss'
     })
   }
 );
@@ -298,16 +305,16 @@ app.get('/api/bots', (req, res) => {
 });
 
 app.post('/api/bots', (req, res) => {
-  const filename = String(req.body?.filename || '');
+  const filename = String(req.body?.filename || '').replace(/\\/g, '/').split('/').pop();
   const source = req.body?.source;
-  if (!/^[a-zA-Z0-9_-]+\.py$/.test(filename)) {
-    return res.status(400).json({ error: 'Tên bot phải kết thúc bằng .py và chỉ chứa chữ, số, _, -.' });
+  if (!filename.toLowerCase().endsWith('.py') || Buffer.byteLength(filename, 'utf8') > 180) {
+    return res.status(400).json({ error: 'Tên tệp phải kết thúc bằng .py và tối đa 180 byte.' });
   }
   if (typeof source !== 'string' || !source.trim()) {
     return res.status(400).json({ error: 'File bot không được để trống.' });
   }
-  if (Buffer.byteLength(source, 'utf8') > 256 * 1024) {
-    return res.status(413).json({ error: 'File bot tối đa 256 KB.' });
+  if (Buffer.byteLength(source, 'utf8') > 1024 * 1024) {
+    return res.status(413).json({ error: 'File bot tối đa 1 MB.' });
   }
   const id = crypto.randomUUID();
   const sha256 = crypto.createHash('sha256').update(source, 'utf8').digest('hex');
@@ -319,15 +326,71 @@ app.post('/api/bots', (req, res) => {
 });
 
 app.get('/api/tournaments', (req, res) => {
-  res.json({ tournaments: tournaments.list().map(({ bots, matches, ...item }) => ({
-    ...item,
-    matches,
-    botCount: bots.length,
-    matchCount: matches.length,
-    completedMatches: matches.filter(match => match.status === 'completed').length,
-    standings: tournaments.standings({ bots, matches })
-  })) });
+  res.json({ tournaments: tournaments.listSummaries().map(tournamentSummary) });
 });
+
+function tournamentProgress(tournament) {
+  const matches = tournament.matches || [];
+  const botCount = tournament.botCount ?? tournament.bots?.length ?? 0;
+  const swissMatches = ['swiss', 'swiss-playoff'].includes(tournament.format)
+    ? tournament.totalRounds * Math.floor(botCount / 2)
+    : tournament.format === 'round-robin-two-legs'
+      ? botCount * Math.max(0, botCount - 1)
+      : tournament.format === 'single-elimination'
+        ? Math.max(0, botCount - 1)
+        : matches.length;
+  const playoffMatches = tournament.format === 'swiss-playoff'
+    ? Math.max(0, 2 * Math.min(32, botCount) - 2)
+    : 0;
+  return {
+    matchCount: swissMatches + playoffMatches,
+    completedMatches: tournament.completedMatches ?? matches.filter(match => match.status === 'completed' &&
+      (!['swiss', 'swiss-playoff'].includes(tournament.format) || !match.result?.bye)).length
+  };
+}
+
+function tournamentSummary(tournament) {
+  const { bots, matches, ...item } = tournament;
+  return {
+    ...item,
+    matches: undefined,
+    standings: undefined,
+    botCount: item.botCount ?? bots?.length ?? 0,
+    ...tournamentProgress(tournament)
+  };
+}
+
+function pagedTournament(tournament, query = {}) {
+  const standingsOffset = Math.max(0, Number.parseInt(query.standingsOffset, 10) || 0);
+  const standingsLimit = Math.min(100, Math.max(1, Number.parseInt(query.standingsLimit, 10) || 50));
+  const matchStage = ['swiss', 'playoff', 'winners', 'losers', 'grand-final'].includes(query.matchStage) ? query.matchStage : 'all';
+  const requestedRound = Number.parseInt(query.matchRound, 10);
+  const matchRound = Number.isInteger(requestedRound) && requestedRound > 0 ? requestedRound : null;
+  const filteredMatches = tournament.matches.filter(match => {
+    const stage = match.stage || 'swiss';
+    const stageMatch = matchStage === 'all'
+      || (matchStage === 'playoff' && stage !== 'swiss')
+      || stage === matchStage;
+    return stageMatch && (matchRound == null || match.round === matchRound);
+  });
+  const matchOffset = Math.max(0, Number.parseInt(query.matchOffset, 10) || 0);
+  const matchLimit = Math.min(100, Math.max(1, Number.parseInt(query.matchLimit, 10) || 50));
+  const standings = tournaments.standings(tournament);
+  const { bots, matches, ...publicTournament } = tournament;
+  return {
+    ...publicTournament,
+    ...tournamentProgress(tournament),
+    standings: standings.slice(standingsOffset, standingsOffset + standingsLimit),
+    standingsOffset,
+    standingsTotal: standings.length,
+    matches: filteredMatches.slice(matchOffset, matchOffset + matchLimit),
+    bracketMatches: matches.filter(match => match.stage && match.stage !== 'swiss'),
+    matchStage,
+    matchRound,
+    matchOffset,
+    matchesTotal: filteredMatches.length
+  };
+}
 
 app.post('/api/tournaments', (req, res) => {
   const mode = req.body?.mode;
@@ -338,20 +401,52 @@ app.post('/api/tournaments', (req, res) => {
   if (!Number.isInteger(maxTurns) || maxTurns < 20 || maxTurns > 2000) {
     return res.status(400).json({ error: 'Giới hạn lượt phải từ 20 đến 2000.' });
   }
+  const botIds = req.body?.botIds;
+  if (Array.isArray(botIds) && botIds.length > 20) {
+    const user = getRequestUser(req);
+    if (!user || !auth.isAdmin(user.id)) return res.status(403).json({ error: 'Chỉ quản trị viên mới có thể chạy giải trên 20 bot.' });
+  }
   try {
     const tournament = tournaments.create({
       name: req.body?.name,
       botIds: req.body?.botIds,
       mode,
       maxTurns,
-      format: req.body?.format === 'single-elimination' ? 'single-elimination' : 'round-robin-two-legs'
+      format: ['swiss', 'swiss-playoff', 'single-elimination', 'round-robin-two-legs'].includes(req.body?.format)
+        ? req.body.format
+        : 'swiss'
     });
-    const { bots, ...publicTournament } = tournament;
-    res.status(201).json({ tournament: {
-      ...publicTournament,
-      bots: bots.map(({ script, ...bot }) => bot),
-      standings: tournaments.standings(tournament)
-    } });
+    res.status(201).json({ tournament: tournamentSummary(tournament) });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/tournaments/:id/pause', (req, res) => {
+  try {
+    tournaments.pause(req.params.id);
+    const tournament = tournaments.read(req.params.id);
+    res.json({ tournament: tournament ? tournamentSummary(tournament) : null });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/tournaments/:id/resume', (req, res) => {
+  try {
+    tournaments.resumeRun(req.params.id);
+    const tournament = tournaments.read(req.params.id);
+    res.json({ tournament: tournament ? tournamentSummary(tournament) : null });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/tournaments/:id/cancel', (req, res) => {
+  try {
+    tournaments.cancel(req.params.id);
+    const tournament = tournaments.read(req.params.id);
+    res.json({ tournament: tournament ? tournamentSummary(tournament) : null });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -360,28 +455,28 @@ app.post('/api/tournaments', (req, res) => {
 app.get('/api/tournaments/:id', (req, res) => {
   const tournament = tournaments.read(req.params.id);
   if (!tournament) return res.status(404).json({ error: 'Tournament not found.' });
-  const { bots, ...publicTournament } = tournament;
-  res.json({ tournament: {
-    ...publicTournament,
-    bots: bots.map(({ script, ...bot }) => bot),
-    standings: tournaments.standings(tournament)
-  } });
+  res.json({ tournament: pagedTournament(tournament, req.query) });
 });
 
 app.get('/api/replays', (req, res) => {
   const replayDir = path.join(__dirname, '..', 'matches');
   if (!fs.existsSync(replayDir)) return res.json({ replays: [] });
   const tournamentReplayDir = path.join(TOURNAMENT_DIR, 'replays');
-  const files = fs.readdirSync(replayDir).filter(file => file.endsWith('.json'));
-  if (fs.existsSync(tournamentReplayDir)) files.push(...fs.readdirSync(tournamentReplayDir).filter(file => file.endsWith('.json')));
+  const files = fs.readdirSync(replayDir).filter(file => file.endsWith('.json') || file.endsWith('.json.gz'));
+  if (fs.existsSync(tournamentReplayDir)) files.push(...fs.readdirSync(tournamentReplayDir).filter(file => file.endsWith('.json') || file.endsWith('.json.gz')));
+  const replayDirByFile = new Map();
+  for (const file of fs.readdirSync(replayDir)) if (file.endsWith('.json') || file.endsWith('.json.gz')) replayDirByFile.set(file, path.join(replayDir, file));
+  if (fs.existsSync(tournamentReplayDir)) for (const file of fs.readdirSync(tournamentReplayDir)) if (file.endsWith('.json') || file.endsWith('.json.gz')) replayDirByFile.set(file, path.join(tournamentReplayDir, file));
   const replays = [...new Set(files)]
+    .sort((a, b) => (fs.statSync(replayDirByFile.get(b)).mtimeMs || 0) - (fs.statSync(replayDirByFile.get(a)).mtimeMs || 0))
+    .slice(0, 1000)
     .map(file => ({ file, path: `/api/replays/${encodeURIComponent(file)}` }));
   res.json({ replays });
 });
 
 app.get('/api/replays/:file', (req, res) => {
   const file = path.basename(req.params.file);
-  if (!file.endsWith('.json')) {
+  if (!file.endsWith('.json') && !file.endsWith('.json.gz')) {
     return res.status(400).json({ error: 'Replay file không hợp lệ.' });
   }
   const replayPath = path.join(__dirname, '..', 'matches', file);
@@ -390,7 +485,13 @@ app.get('/api/replays/:file', (req, res) => {
   if (!fs.existsSync(resolvedReplayPath)) {
     return res.status(404).json({ error: 'Không tìm thấy replay.' });
   }
-  res.sendFile(resolvedReplayPath);
+  if (file.endsWith('.json.gz')) {
+    try {
+      res.type('application/json').send(zlib.gunzipSync(fs.readFileSync(resolvedReplayPath)));
+    } catch {
+      res.status(500).json({ error: 'Replay file bị lỗi.' });
+    }
+  } else res.sendFile(resolvedReplayPath);
 });
 
 function send(socket, type, payload = {}) {

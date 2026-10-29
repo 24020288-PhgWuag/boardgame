@@ -317,30 +317,70 @@ người thắng với kết quả đã lưu.
 
 ### Giải đấu bot
 
-Mở **🏆 Bot Tournament** từ sảnh để chọn 2–12 bot, chế độ bàn cờ, thể thức và
-giới hạn lượt. Thể thức **Đấu loại trực tiếp** tự tạo bracket theo lũy thừa của
-2 gần nhất; với 12 bot, 4 bot được bye ở vòng đầu, sau đó đấu tứ kết, bán kết
-và chung kết. Trận hòa được chạy tối đa 3 lượt phân định; bot thắng được đi
-tiếp và nhà vô địch hiển thị trên trang giải.
+Mở **🏆 Bot Tournament** từ sảnh để tải lên nhiều file `.py` (tối đa 1 MB mỗi
+file), chọn bot, chế độ bàn cờ và giới hạn lượt. Thể thức mặc định là **Swiss +
+playoff top 32**. Swiss chạy `ceil(log2(số bot))` vòng; mỗi vòng ghép các bot có
+điểm gần nhau và tránh đấu lại đối thủ cũ. Sau Swiss, tối đa 32 bot đứng đầu
+bước vào nhánh thắng và nhánh thua. Nhánh thắng thi đấu vòng 1/16, 1/8, tứ kết,
+bán kết rồi chung kết nhánh thắng; bot thua rơi xuống nhánh thua và tiếp tục
+thi đấu đến chung kết nhánh thua. Hai bot thắng ở hai nhánh gặp nhau ở chung kết
+tổng. Trận hòa Swiss được nửa điểm mỗi bot; trận playoff và loại trực tiếp được
+chạy lại tối đa 10 lượt để tìm người thắng. Chọn **Swiss · chỉ xếp hạng** để
+không chạy playoff. Vòng tròn hai lượt vẫn có sẵn cho giải nhỏ.
+
+Giải có thể có 2–10.000 bot. Tài khoản quản trị mới được tạo giải trên 20 bot;
+đăng nhập bằng tài khoản `ADMIN_USERNAME`. Với 10.000 bot, thể thức mặc định
+chạy 14 vòng Swiss và 62 trận playoff (70.062 trận tổng cộng). Máy chủ chạy hai
+trận cùng lúc mặc định; đổi mức này bằng `TOURNAMENT_CONCURRENCY`. Một giải lớn
+có thể chạy rất lâu và cần đủ CPU, RAM, dung lượng đĩa và Docker Engine trên máy
+chủ. Build image bot runner một lần theo phần **Bảo vệ khi chạy bot không đáng
+tin** ở trên. Không chạy bot của học sinh trực tiếp trên host.
+
+Danh sách giải hiển thị trạng thái và tiến độ; mở chi tiết để xem bảng xếp hạng,
+lọc lịch đấu theo vòng, xem sơ đồ nhánh thắng/nhánh thua/chung kết tổng và phát
+lại từng trận. Sơ đồ có nút **Mở rộng** để xem toàn màn hình và **Vừa khung** để
+thu toàn bộ cây đấu vào một khung nhìn. Replay giải được nén trên đĩa và máy chủ
+giải nén khi trình duyệt phát. Tiến độ có thể khôi phục sau khi khởi động lại
+server.
 
 Thể thức **Vòng tròn hai lượt** giữ nguyên cách cũ: mỗi cặp bot đấu hai ván,
 đổi bên P1/P2 ở ván thứ hai. Thắng được 1 điểm, hòa 0.5 điểm. Bảng xếp hạng,
-tiến độ và replay được lưu trong
-`matches/tournaments/`; replay cũng xuất hiện trong trình xem replay. Bot tải
-lên từ giao diện được lưu thành phiên bản bất biến trong `bots/submissions/`.
-Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi khởi động lại server.
+tiến độ và replay được lưu trong `matches/tournaments/`; replay cũng xuất hiện
+trong trình xem replay gần đây. Bot tải lên từ giao diện được lưu thành phiên
+bản bất biến trong `bots/submissions/`.
 
 ### Giải cộng đồng do admin tổ chức
 
-Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 12 suất. Người chơi
+Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 20 suất. Người chơi
 đăng nhập rồi mở `/tournaments.html`, chọn một file Python và bấm **Đăng ký
 bot** trong giải cộng đồng. Mỗi tài khoản chỉ được đăng ký một bot trong mỗi
 giải; một submission cũng không thể được dùng bởi hai tài khoản. Admin có thể
-bắt đầu khi có từ 2 đến 12 người, hệ thống tự tạo bracket loại trực tiếp và
-hiển thị tiến độ, danh sách người chơi và nhà vô địch công khai.
+bắt đầu khi có từ 2 đến 20 người; giải cộng đồng chạy Swiss và hiển thị tiến
+độ, danh sách người chơi và nhà vô địch công khai.
 
 Thông tin giải cộng đồng được lưu tại `matches/tournaments/community-events.json`;
 file bot bất biến và metadata chủ sở hữu nằm trong `bots/submissions/`.
+
+### Nhập và chạy giải offline từ Google Forms
+
+Khi học sinh nộp bot qua Google Form, admin tải các file `.py` về một thư mục rồi chạy:
+
+```powershell
+npm run bot:batch -- C:\path\to\submissions --metadata C:\path\to\responses.csv --mode army --max-turns 300 --pool-size 20
+```
+
+Script sẽ:
+- quét đệ quy thư mục và kiểm tra cú pháp Python bằng `python -m py_compile`;
+- loại file rỗng, quá 1 MB, trùng nội dung và file không đọc được;
+- đọc metadata từ CSV/JSON (cột tên file, tên, mã sinh viên, email) nếu có;
+- chia bot thành các pool tối đa 20 bot và chạy Swiss cho từng pool;
+- nếu có nhiều pool, chạy thêm giải chung kết với `--advance` bot đứng đầu mỗi pool;
+- xuất `validation.json`, `standings-pool-*.csv/json`, `standings-final.*`, `summary.json`
+  và thư mục `replays/` cùng `submissions/` đã đóng băng.
+
+Các tùy chọn hữu ích: `--validate-only`, `--dry-run`, `--no-sandbox` (chỉ dùng cho bot tin cậy/
+máy local), `--concurrency`, `--output`. Bot học sinh vẫn nên chạy trong Docker theo phần
+**Bảo vệ khi chạy bot không đáng tin**; không dùng `--no-sandbox` cho mã không tin cậy.
 
 Có thể tạo giải round-robin từ terminal với hai bot mẫu:
 
