@@ -9,7 +9,7 @@ npm install
 npm start
 ```
 
-Mở `http://localhost:3000` trong hai tab trình duyệt. Một người tạo phòng, người còn lại nhập mã phòng.
+Mở `http://localhost:25566` trong hai tab trình duyệt. Một người tạo phòng, người còn lại nhập mã phòng.
 
 ### Tài khoản người chơi
 
@@ -76,7 +76,7 @@ Mỗi trận bot-vs-bot hoàn tất cũng được tự động lưu thành repl
 `matches/`. Tên file có dạng
 `bot-p1-bot-p2-yyyymmdd-hhmmss.json`, ví dụ
 `minimax-bot-random-bot-20261015-163500.json`, và có thể xem tại
-`http://localhost:3000/replay.html`.
+`http://localhost:25566/replay.html`.
 
 Từ sảnh chính, nhấn **🎬 Xem replay** để mở trình xem replay trực quan.
 
@@ -101,7 +101,7 @@ Server tự migrate dữ liệu cũ từ `data/users.json` lần đầu chạy. 
 
 ### Trang quản trị
 
-Mở `http://localhost:3000/admin.html`. API quản trị yêu cầu tài khoản khớp
+Mở `http://localhost:25566/admin.html`. API quản trị yêu cầu tài khoản khớp
 với biến môi trường `ADMIN_USERNAME`:
 
 ```powershell
@@ -218,7 +218,7 @@ Body cho một trận:
 
 `winner` nhận `bot1`, `bot2` hoặc `draw`; `playedAt` có thể bỏ qua. Có thể
 gửi tối đa 100 trận trong `{ "results": [...] }`. Endpoint trả HTTP `202` khi
-đã nhận vào Redis; phản hồi không có nghĩa là Google Sheets đã ghi xong.
+đã nhận vào hàng đợi; phản hồi không có nghĩa là Google Sheets đã ghi xong.
 Cùng `matchId` được bỏ qua trong 7 ngày để client có thể retry an toàn. Nếu
 hàng đợi đầy hoặc Redis không sẵn sàng, server trả `503` để caller retry có
 backoff.
@@ -228,9 +228,15 @@ backoff.
 1. Tạo Google Cloud project, bật **Google Sheets API**, rồi tạo Service Account
    và tải JSON key về máy chủ dưới tên ngoài repository.
 2. Mở JSON, lấy `client_email`, rồi chia sẻ spreadsheet
-   [ID đã cấu hình](https://docs.google.com/spreadsheets/d/1ih-uW88lfBq_e1d0meTgUvZtVWXX455aNl5nxbqNGD4/edit)
+   [ID đã cấu hình](https://docs.google.com/spreadsheets/d/1AQsnAoWM2h1l1KnF0YTUzgFSlW-Tb8HpIzFUxRJlpIY/edit)
    cho email đó với quyền **Editor**. Worker tự tạo tab `Matches` và hàng tiêu
    đề (`matchId`, `bot1`, `bot2`, `winner`, `playedAt`) nếu chưa có.
+   Ngoài tab nhật ký, worker còn đồng bộ giải đấu gần nhất thành các tab giống
+   trang giải đấu: `Tổng quan` (thông tin giải + bảng xếp hạng), `Vòng 1` …
+   `Vòng N` (bảng trận Swiss) và `Playoff` (sơ đồ nhánh thắng, nhánh thua,
+   chung kết tổng). Snapshot tự làm mới sau mỗi trận hoàn tất hoặc khi tạo
+   vòng mới; các thay đổi trong `MATCH_SHEETS_TOURNAMENT_SYNC_MS` được gộp lại.
+   Tab `Vòng n`/`Playoff` cũ không còn dùng sẽ tự được xóa.
 3. Sao chép `.env.example` thành `.env`, đặt `MATCH_INGEST_TOKEN` thành secret
    ngẫu nhiên mạnh nếu dùng endpoint nhận dữ liệu từ bên ngoài, cập nhật
    `GOOGLE_APPLICATION_CREDENTIALS` thành đường dẫn JSON trên host và cấu hình
@@ -250,7 +256,8 @@ Worker chỉ cho phép một instance ghi tại một thời điểm qua Redis l
 giây (tối đa khoảng 50 request/phút, thấp hơn quota Sheets phổ biến 60
 request/phút). Chỉnh qua các biến `MATCH_SHEETS_BATCH_SIZE`,
 `MATCH_SHEETS_FLUSH_INTERVAL_MS`, `MATCH_SHEETS_MIN_APPEND_INTERVAL_MS`,
-`MATCH_SHEETS_RANGE` và `MATCH_RESULTS_MAX_QUEUE`. Google Sheets không phù hợp
+`MATCH_SHEETS_TOURNAMENT_SYNC_MS`, `MATCH_SHEETS_RANGE` và
+`MATCH_RESULTS_MAX_QUEUE`. Google Sheets không phù hợp
 làm kho dữ liệu thời gian thực cho 10.000 trận/giây: khi queue đầy, API trả
 `503`; dùng PostgreSQL/BigQuery làm nguồn dữ liệu chính, rồi xuất báo cáo sang
 Sheets theo batch. Redis persistence và backup vẫn cần thiết. Nếu timeout xảy
@@ -401,14 +408,14 @@ npm start
 Mở:
 
 ```text
-http://localhost:3000/replay.html
+http://localhost:25566/replay.html
 ```
 
 Trang replay liệt kê các file trong `matches/` và hỗ trợ tải trận, phát/tạm
 dừng, đi tới/lùi từng nước và thay đổi tốc độ. Có thể mở trực tiếp một file:
 
 ```text
-http://localhost:3000/replay.html?file=bot-match-1792080020040.json
+http://localhost:25566/replay.html?file=bot-match-1792080020040.json
 ```
 
 ## Ghi chú asset

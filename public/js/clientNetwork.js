@@ -13,7 +13,7 @@ window.ClientNetwork = class {
 
   connect() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = location.host || 'localhost:3000';
+    const host = location.host || 'localhost:25566';
     const wsUrl = `${protocol}//${host}`;
 
     try {

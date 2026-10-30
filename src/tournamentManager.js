@@ -27,6 +27,7 @@ class TournamentManager {
     this.resolveBot = options.resolveBot;
     this.runMatch = options.runMatch;
     this.onMatchComplete = options.onMatchComplete || (() => {});
+    this.onTournamentChange = options.onTournamentChange || (() => {});
     this.maxBots = options.maxBots ?? 20;
     this.autoStart = options.autoStart ?? true;
     this.maxConcurrentMatches = Math.max(1, Math.min(64, Number(options.maxConcurrentMatches) || 1));
@@ -97,6 +98,11 @@ class TournamentManager {
     const temp = `${file}.tmp`;
     fs.writeFileSync(temp, `${JSON.stringify(metadata)}\n`, 'utf8');
     renameWithRetry(temp, file);
+    try {
+      this.onTournamentChange(tournament);
+    } catch (error) {
+      console.error('Tournament change listener failed:', error.message);
+    }
   }
 
   list() {

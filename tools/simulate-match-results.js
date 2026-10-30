@@ -3,7 +3,7 @@ require('dotenv').config();
 const { isIP } = require('node:net');
 
 const target = new URL(process.env.MATCH_RESULTS_TEST_URL ||
-  'http://127.0.0.1:3000/api/match-results');
+  'http://127.0.0.1:25566/api/match-results');
 const count = parseInteger(process.env.MATCH_RESULTS_TEST_COUNT, 1000, 1, 100000);
 const concurrency = parseInteger(process.env.MATCH_RESULTS_TEST_CONCURRENCY, 25, 1, 100);
 const token = process.env.MATCH_RESULTS_TEST_TOKEN || process.env.MATCH_INGEST_TOKEN;

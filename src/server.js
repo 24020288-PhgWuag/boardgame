@@ -117,7 +117,14 @@ const tournaments = new TournamentManager(TOURNAMENT_DIR, {
   runMatch,
   maxBots: 10_000,
   maxConcurrentMatches: Number(process.env.TOURNAMENT_CONCURRENCY) || 2,
-  onMatchComplete: recordMatchResult
+  onMatchComplete: recordMatchResult,
+  onTournamentChange: matchResultSheets.scheduleTournamentSync
+});
+matchResultSheets.configureTournamentSync(id => {
+  const tournament = tournaments.read(id);
+  if (!tournament) return null;
+  tournament.standings = tournaments.standings(tournament);
+  return tournament;
 });
 const communityTournaments = new CommunityTournamentManager(
   path.join(TOURNAMENT_DIR, 'community-events.json'),
@@ -1046,7 +1053,7 @@ wss.on('connection', (socket, req) => {
   });
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 25566;
 server.listen(port, () => {
   console.log(`OTT V2 Server is running at http://localhost:${port}`);
   console.log(`Multiplayer available at http://localhost:${port}/playfull.html`);
@@ -1055,6 +1062,10 @@ server.listen(port, () => {
     : 'Automatic match results disabled: GOOGLE_APPLICATION_CREDENTIALS is not configured.');
   tournaments.resume();
   matchResultSheets.startWorker();
+  const latestTournament = tournaments.listSummaries()[0];
+  if (latestTournament) {
+    matchResultSheets.scheduleTournamentSync(tournaments.read(latestTournament.id));
+  }
 });
 
 let shuttingDown = false;
