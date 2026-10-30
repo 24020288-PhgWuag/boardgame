@@ -162,7 +162,7 @@
             <div class="player-header">
               <span class="player-badge">P1</span>
               <div class="player-info">
-                <strong><span id="p1-name">Đội Đỏ</span> (Căn cứ A1)</strong>
+                <strong><span id="p1-name">Đội Đỏ</span><span id="p1-host-badge" class="role-tag host-badge hidden">👑 HOST</span> (Căn cứ A1)</strong>
                 <small id="p1-state">Chờ kết nối</small>
                 <span id="p1-role-badge" class="role-tag is-opponent">ĐỐI THỦ</span>
               </div>
@@ -236,7 +236,7 @@
             <div class="player-header">
               <span class="player-badge">P2</span>
               <div class="player-info">
-                <strong><span id="p2-name">Đội Xanh</span> (Căn cứ I9)</strong>
+                <strong><span id="p2-name">Đội Xanh</span><span id="p2-host-badge" class="role-tag host-badge hidden">👑 HOST</span> (Căn cứ I9)</strong>
                 <small id="p2-state">Chờ kết nối</small>
                 <span id="p2-role-badge" class="role-tag is-opponent">ĐỐI THỦ</span>
               </div>
@@ -430,6 +430,8 @@
     let botMatchOptions = null;
     let gameTimer = null;
     let timeLeft = 30;
+    let authoritativeTurnDeadline = null;
+    let roomHost = null;
 
     window.showMessage = function(text, type = 'info') {
       const msgEl = $('game-message');
@@ -502,7 +504,9 @@
         stopTurnTimer();
         setTimeout(() => showResultModal(state.winner, state.winReason), 600);
       } else {
-        resetTurnTimer();
+        if (isLocalGame) resetTurnTimer();
+        else if (authoritativeTurnDeadline) updateTurnTimer(authoritativeTurnDeadline);
+        else pauseTurnTimer();
         if ((!isLocalGame && state.turn === player) || (isLocalGame && state.turn === 'p1')) {
           sound.playTurn();
         }
@@ -630,9 +634,23 @@
       }
     }
 
+    function pauseTurnTimer() {
+      stopTurnTimer();
+      $('turn-timer-badge').textContent = '--';
+    }
+
+    function updateRoomHost(host) {
+      roomHost = ['p1', 'p2'].includes(host) ? host : null;
+      $('p1-host-badge').classList.toggle('hidden', roomHost !== 'p1');
+      $('p2-host-badge').classList.toggle('hidden', roomHost !== 'p2');
+    }
+
     function showGameView(data) {
       player = data.player || player;
       state = data.state;
+      updateRoomHost(data.host);
+      authoritativeTurnDeadline = data.turnDeadline || null;
+      stopTurnTimer();
       isBotGame = Boolean(data.bot);
       isBotMatch = Boolean(data.botMatch);
       botMatchOptions = data.botMatchOptions || null;
@@ -644,7 +662,21 @@
       $('game').classList.remove('hidden');
       $('room-label').textContent = data.code || 'LOCAL';
       $('room-code-display').textContent = data.code || 'LOCAL';
+      if (authoritativeTurnDeadline) updateTurnTimer(authoritativeTurnDeadline);
+      else pauseTurnTimer();
       onStateUpdated('init');
+    }
+
+    function updateTurnTimer(deadline) {
+      authoritativeTurnDeadline = deadline;
+      stopTurnTimer();
+      const tick = () => {
+        timeLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        $('turn-timer-badge').textContent = `${timeLeft}s`;
+        if (timeLeft <= 0) stopTurnTimer();
+      };
+      tick();
+      gameTimer = setInterval(tick, 250);
     }
 
     function startLocalGame(vsBot = false) {
@@ -800,6 +832,7 @@
       network.on('open', () => {
         $('connection').textContent = 'ONLINE';
         $('connection').classList.add('online');
+        network.send('list_rooms');
         if (callback) callback();
       });
 
@@ -820,14 +853,39 @@
         showGameView(data);
       });
 
+      network.on('room-closed', () => {
+        try {
+          sessionStorage.removeItem('ott_active_room');
+        } catch (error) {
+          console.warn('Could not clear saved room details:', error);
+        }
+        history.replaceState(null, '', location.pathname);
+        stopTurnTimer();
+        state = null;
+        authoritativeTurnDeadline = null;
+        isLocalGame = false;
+        updateRoomHost(null);
+        $('game').classList.add('hidden');
+        $('lobby').classList.remove('hidden');
+        showToast('Phòng đã được giải tán vì không còn người chơi.', 'info');
+      });
+
       network.on('room-update', (data) => {
         state = data.state;
+        updateRoomHost(data.host);
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
+        else pauseTurnTimer();
         onStateUpdated('update');
         if (data.message) showToast(data.message, 'info');
       });
 
       network.on('state', (data) => {
         state = data.state;
+        updateRoomHost(data.host);
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
+        else pauseTurnTimer();
         onStateUpdated(data.result, data.capturedPiece, data.from, data.to);
       });
 
@@ -838,6 +896,10 @@
 
       network.on('rematch', (data) => {
         state = data.state;
+        updateRoomHost(data.host);
+        authoritativeTurnDeadline = data.turnDeadline || null;
+        if (data.turnDeadline) updateTurnTimer(data.turnDeadline);
+        else pauseTurnTimer();
         $('result-modal').classList.add('hidden');
         onStateUpdated('rematch');
         showToast(data.message, 'info');
@@ -858,10 +920,13 @@
       });
     }
 
+    // A just-left room is hidden briefly so a stale list can't show it again.
+    const leftRoomCodes = new Map();
     function renderPublicRooms(rooms) {
       const listEl = $('open-rooms-list');
       const cardEl = $('open-rooms-card');
-      if (!rooms || !rooms.length) {
+      rooms = (rooms || []).filter(room => (leftRoomCodes.get(room.code) || 0) <= Date.now());
+      if (!rooms.length) {
         cardEl.classList.add('hidden');
         return;
       }
@@ -997,9 +1062,42 @@
       $('result-modal').classList.add('hidden');
       if (isBotMatch) showToast('Đã đóng thông báo kết quả.', 'info');
     };
-    $('btn-leave').onclick = () => {
-      network?.clearRoom();
-      location.reload();
+    $('btn-leave').onclick = async () => {
+      const leaveButton = $('btn-leave');
+      if (leaveButton.disabled) return;
+      leaveButton.disabled = true;
+      try {
+        sessionStorage.removeItem('ott_active_room');
+      } catch (error) {
+        console.warn('Could not clear saved room details:', error);
+      }
+      history.replaceState(null, '', location.pathname);
+      stopTurnTimer();
+      state = null;
+      authoritativeTurnDeadline = null;
+      isLocalGame = false;
+      isBotGame = false;
+      isBotMatch = false;
+      botMatchOptions = null;
+      $('game').classList.add('hidden');
+      $('lobby').classList.remove('hidden');
+      $('result-modal').classList.add('hidden');
+      const leftCode = $('room-code-display').textContent.trim();
+      if (leftCode) leftRoomCodes.set(leftCode, Date.now() + 3000);
+      $('open-rooms-card').classList.add('hidden');
+      const activeNetwork = network;
+      network = null;
+      const leaving = activeNetwork?.leaveRoom();
+      connectOnline();
+      try {
+        await leaving;
+        if (network?.connected) network.send('list_rooms');
+      } catch (error) {
+        console.error('Could not confirm leaving the room:', error);
+      } finally {
+        activeNetwork?.stop();
+        leaveButton.disabled = false;
+      }
     };
 
     $('copy-code-btn').onclick = () => {

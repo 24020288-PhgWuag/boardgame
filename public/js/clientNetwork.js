@@ -10,8 +10,24 @@ window.ClientNetwork = class {
     this.reconnectAttempts = 0;
     this.everConnected = false;
     this.stopped = false;
+    this.leaving = false;
+    this.socketBindings = new Map();
 
     this.connect();
+  }
+
+  listen(socket, event, handler) {
+    socket.addEventListener(event, handler);
+    const bindings = this.socketBindings.get(socket) || [];
+    bindings.push([event, handler]);
+    this.socketBindings.set(socket, bindings);
+  }
+
+  removeSocketListeners(socket) {
+    for (const [event, handler] of this.socketBindings.get(socket) || []) {
+      socket.removeEventListener?.(event, handler);
+    }
+    this.socketBindings.delete(socket);
   }
 
   connect() {
@@ -22,8 +38,9 @@ window.ClientNetwork = class {
 
     try {
       this.socket = new WebSocket(wsUrl);
+      const socket = this.socket;
 
-      this.socket.addEventListener('open', () => {
+      this.listen(socket, 'open', () => {
         const reconnecting = this.everConnected;
         this.everConnected = true;
         this.reconnectAttempts = 0;
@@ -36,9 +53,10 @@ window.ClientNetwork = class {
         }
       });
 
-      this.socket.addEventListener('message', (event) => {
+      this.listen(socket, 'message', (event) => {
         try {
           const data = JSON.parse(event.data);
+          if (this.leaving && data.type !== 'room-left') return;
           if (data.type === 'pong' && data.time) {
             this.latency = Date.now() - data.time;
             this.emit('latency', this.latency);
@@ -52,14 +70,16 @@ window.ClientNetwork = class {
         }
       });
 
-      this.socket.addEventListener('close', () => {
+      this.listen(socket, 'close', () => {
         this.connected = false;
         this.stopPing();
         this.emit('close');
+        this.removeSocketListeners(socket);
+        if (this.socket === socket) this.socket = null;
         this.scheduleReconnect();
       });
 
-      this.socket.addEventListener('error', (err) => {
+      this.listen(socket, 'error', (err) => {
         this.emit('error', err);
       });
     } catch (err) {
@@ -151,6 +171,36 @@ window.ClientNetwork = class {
     }
   }
 
+  leaveRoom(timeoutMs = 1200) {
+    this.stopped = true;
+    this.leaving = true;
+    this.clearRoom();
+    this.stopPing();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise(resolve => {
+      let timeout;
+      const finish = acknowledged => {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve(acknowledged);
+      };
+      const unsubscribe = this.on('room-left', () => finish(true));
+      timeout = setTimeout(() => finish(false), timeoutMs);
+      try {
+        this.send('leave_room');
+      } catch (error) {
+        console.error('Could not send room leave request:', error);
+        finish(false);
+      }
+    });
+  }
+
   startPing() {
     this.stopPing();
     this.pingInterval = setInterval(() => {
@@ -170,6 +220,13 @@ window.ClientNetwork = class {
     this.stopPing();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.socket?.close();
+    const socket = this.socket;
+    this.socket = null;
+    this.connected = false;
+    if (socket) {
+      this.removeSocketListeners(socket);
+      socket.close();
+    }
+    this.listeners.clear();
   }
 };

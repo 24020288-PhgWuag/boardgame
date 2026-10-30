@@ -17,6 +17,7 @@ class RoomManager {
       mode,
       createdAt: Date.now(),
       matchResultId: crypto.randomUUID(),
+      host: null,
       state: createInitialState(mode),
       sockets: new Map(), // socket -> 'p1' | 'p2' | 'spectator'
       spectators: new Set(),
@@ -54,6 +55,9 @@ class RoomManager {
     const room = this.getRoom(code);
     if (!room) return { error: 'Không tìm thấy phòng đấu với mã này.' };
 
+    clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = null;
+
     // Rejoining the same socket should keep its current seat instead of creating duplicates.
     const existingRole = room.sockets.get(socket);
     if (existingRole) {
@@ -87,6 +91,7 @@ class RoomManager {
     if (role === 'p1' || role === 'p2') {
       room.state.players[role] ||= username || role;
       room.disconnectedPlayers.delete(role);
+      if (!room.host) room.host = role;
     }
 
     return { room, player: role };
@@ -104,6 +109,9 @@ class RoomManager {
       existing.mode = snapshot.mode;
       existing.createdAt = snapshot.createdAt;
       existing.matchResultId = snapshot.matchResultId;
+      existing.host = Object.hasOwn(snapshot, 'host')
+        ? (['p1', 'p2'].includes(snapshot.host) ? snapshot.host : null)
+        : existing.host || (snapshot.state.players.p1 ? 'p1' : snapshot.state.players.p2 ? 'p2' : null);
       existing.passwordHash = snapshot.passwordHash || null;
       existing.state = snapshot.state;
       existing.turnDeadline = snapshot.turnDeadline || null;
@@ -115,6 +123,9 @@ class RoomManager {
 
     const room = {
       ...snapshot,
+      host: Object.hasOwn(snapshot, 'host')
+        ? (['p1', 'p2'].includes(snapshot.host) ? snapshot.host : null)
+        : snapshot.state.players.p1 ? 'p1' : snapshot.state.players.p2 ? 'p2' : null,
       sockets: new Map(),
       spectators: new Set(),
       disconnectedPlayers: new Set(disconnectedPlayers),
@@ -142,6 +153,11 @@ class RoomManager {
   getPublicRooms() {
     const list = [];
     for (const [code, room] of this.rooms.entries()) {
+      const hasConnectedPlayer = ['p1', 'p2'].some(player =>
+        room.state.players[player] && !room.disconnectedPlayers.has(player)
+      );
+      if (!hasConnectedPlayer) continue;
+
       let p1 = Boolean(room.state.players.p1);
       let p2 = Boolean(room.state.players.p2 || room.bot || room.botMatch);
       let spectators = 0;
@@ -171,6 +187,13 @@ class RoomManager {
         room.sockets.delete(socket);
         room.spectators.delete(socket);
         if (role === 'p1' || role === 'p2') room.disconnectedPlayers.add(role);
+        if (room.host === role) {
+          room.host = ['p1', 'p2'].find(player =>
+            player !== role &&
+            room.state.players[player] &&
+            !room.disconnectedPlayers.has(player)
+          ) || null;
+        }
 
         // Keep the seat identity so the same authenticated player can reconnect.
         if (room.sockets.size === 0) {
@@ -185,9 +208,23 @@ class RoomManager {
     return null;
   }
 
-  deleteRoom(code) {
+  leave(socket) {
+    const result = this.remove(socket);
+    if (!result) return null;
+
+    const { room, disconnectedRole } = result;
+    if (disconnectedRole === 'p1' || disconnectedRole === 'p2') {
+      room.state.players[disconnectedRole] = null;
+      room.disconnectedPlayers.delete(disconnectedRole);
+    }
+
+    return result;
+  }
+
+  deleteRoom(code, { force = false } = {}) {
     const room = this.getRoom(code);
-    if (!room || room.sockets.size) return false;
+    if (!room || (room.sockets.size && !force)) return false;
+    clearTimeout(room.cleanupTimer);
     room.bot?.stop();
     room.botMatch?.p1?.stop();
     room.botMatch?.p2?.stop();

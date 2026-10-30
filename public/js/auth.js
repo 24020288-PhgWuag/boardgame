@@ -33,7 +33,8 @@ window.Auth = (() => {
     async load() {
       const data = await request('/api/auth/me');
       user = data.user;
-      notify();
+      // Kết nối WebSocket đã mang sẵn cookie phiên, không cần mở lại khi chỉ nạp thông tin.
+      notify({ preserveConnection: true });
       return user;
     },
     async register(username, password) {

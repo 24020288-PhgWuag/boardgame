@@ -74,6 +74,7 @@ class RoomStateStore {
       mode: room.mode,
       createdAt: room.createdAt,
       matchResultId: room.matchResultId,
+      host: room.host || null,
       passwordHash: room.passwordHash,
       state: room.state,
       disconnectedPlayers: [...(room.disconnectedPlayers || [])],
@@ -97,6 +98,12 @@ class RoomStateStore {
   async get(code) {
     const value = await this.redis.get(`${ROOM_PREFIX}${String(code).toUpperCase()}`);
     return value ? JSON.parse(value) : null;
+  }
+
+  async deleteRoom(code) {
+    const normalizedCode = String(code).toUpperCase();
+    await this.redis.del(`${ROOM_PREFIX}${normalizedCode}`);
+    await this.publish({ kind: 'room-removed', code: normalizedCode });
   }
 
   async lock(code, timeoutMs = 3000) {

@@ -601,12 +601,14 @@ function deliverMatchedPlayer(event) {
     player: joined.player,
     state: room.state,
     mode: room.mode,
+    host: room.host || null,
     turnDeadline: room.turnDeadline || null
   });
   broadcast(room, 'room-update', {
     state: room.state,
     event: 'player_joined',
     player: joined.player,
+    host: room.host || null,
     turnDeadline: room.turnDeadline || null
   });
   broadcastRooms();
@@ -641,6 +643,16 @@ if (roomStateStore) {
       if (room) {
         for (const socket of room.sockets.keys()) send(socket, event.type, event.payload);
       }
+    } else if (event.kind === 'room-removed') {
+      const room = rooms.getRoom(event.code);
+      if (room) {
+        for (const socket of room.sockets.keys()) {
+          socket.roomCode = null;
+          send(socket, 'room-closed', { code: event.code });
+        }
+      }
+      rooms.deleteRoom(event.code, { force: true });
+      broadcastRooms();
     } else if (event.kind === 'rooms') {
       for (const socket of wss.clients) send(socket, 'rooms_list', { rooms: event.rooms });
     } else if (event.kind === 'match-found') {
@@ -658,6 +670,7 @@ function broadcastState(room, outcome, from, to, player) {
     from,
     to,
     lastPlayer: player,
+    host: room.host || null,
     turnDeadline: room.turnDeadline || null
   });
 }
@@ -788,6 +801,13 @@ function setTurnDeadline(room) {
       }
     }
   }, TURN_LIMIT_MS + 100);
+}
+
+function hasConnectedPlayer(room) {
+  return !room.bot && !room.botMatch &&
+    ['p1', 'p2'].some(player =>
+      room.state.players[player] && !room.disconnectedPlayers.has(player)
+    );
 }
 
 function rateLimitSocket(socket, type) {
@@ -954,7 +974,7 @@ wss.on('connection', (socket, req) => {
         }
 
         if (roomStateStore && socket.user &&
-            ['join', 'move', 'rematch', 'chat'].includes(message.type)) {
+            ['join', 'move', 'rematch', 'chat', 'leave_room'].includes(message.type)) {
           lockCode = message.type === 'join'
             ? String(message.code || '').trim().toUpperCase()
             : socket.roomCode;
@@ -972,6 +992,40 @@ wss.on('connection', (socket, req) => {
         // Request rooms list
         if (message.type === 'list_rooms') {
           return send(socket, 'rooms_list', { rooms: rooms.getPublicRooms() });
+        }
+
+        if (message.type === 'leave_room') {
+          const result = rooms.leave(socket);
+          if (result?.room) {
+            const { room } = result;
+            socket.roomCode = null;
+            if (['p1', 'p2'].includes(result.disconnectedRole)) setTurnDeadline(room);
+
+            if (!hasConnectedPlayer(room)) {
+              for (const roomSocket of room.sockets.keys()) {
+                roomSocket.roomCode = null;
+                send(roomSocket, 'room-closed', { code: result.code });
+              }
+              rooms.deleteRoom(result.code, { force: true });
+              // Notify clients before the slower Redis cleanup so the room vanishes instantly.
+              broadcastRooms();
+              send(socket, 'room-left');
+              if (roomStateStore) await roomStateStore.deleteRoom(result.code);
+              return;
+            } else {
+              if (roomStateStore) await roomStateStore.save(room);
+              else saveRoomState(room);
+              broadcast(room, 'room-update', {
+                state: room.state,
+                event: 'player_left',
+                disconnectedRole: result.disconnectedRole,
+                host: room.host || null,
+                turnDeadline: room.turnDeadline || null
+              });
+            }
+            broadcastRooms();
+          }
+          return send(socket, 'room-left');
         }
 
         if (message.type === 'quick_match') {
@@ -992,6 +1046,7 @@ wss.on('connection', (socket, req) => {
 
             const room = rooms.createRoom(mode);
             room.state.players = { p1: candidate.username, p2: socket.user.username };
+            room.host = 'p1';
             room.disconnectedPlayers.add('p1');
             room.disconnectedPlayers.add('p2');
             const joined = rooms.joinRoom(room.code, socket);
@@ -1002,6 +1057,7 @@ wss.on('connection', (socket, req) => {
               player: joined.player,
               state: room.state,
               mode: room.mode,
+              host: room.host,
               turnDeadline: room.turnDeadline || null
             });
             const event = {
@@ -1025,10 +1081,24 @@ wss.on('connection', (socket, req) => {
             room.state.players.p2 = socket.user.username;
             existing.socket.roomCode = room.code;
             socket.roomCode = room.code;
-            send(existing.socket, 'joined', { code: room.code, player: first.player, state: room.state, mode: room.mode });
-            send(socket, 'joined', { code: room.code, player: second.player, state: room.state, mode: room.mode });
-            saveRoomState(room);
             setTurnDeadline(room);
+            send(existing.socket, 'joined', {
+              code: room.code,
+              player: first.player,
+              state: room.state,
+              mode: room.mode,
+              host: room.host,
+              turnDeadline: room.turnDeadline || null
+            });
+            send(socket, 'joined', {
+              code: room.code,
+              player: second.player,
+              state: room.state,
+              mode: room.mode,
+              host: room.host,
+              turnDeadline: room.turnDeadline || null
+            });
+            saveRoomState(room);
             return;
           }
           matchmakingQueue.push({ socket, elo: socket.user.elo, mode: message.mode || 'army' });
@@ -1068,6 +1138,7 @@ wss.on('connection', (socket, req) => {
             state: room.state,
             mode: room.mode,
             bot: Boolean(room.bot),
+            host: room.host || null,
             turnDeadline: room.turnDeadline || null
           });
           saveRoomState(room);
@@ -1122,6 +1193,7 @@ wss.on('connection', (socket, req) => {
             player: joined.player,
             state: room.state,
             mode: room.mode,
+            host: room.host || null,
             botMatch: true,
             botMatchOptions: {
               botP1,
@@ -1168,18 +1240,22 @@ wss.on('connection', (socket, req) => {
           if (joined.player === 'p1' || joined.player === 'p2') {
             joined.room.state.players[joined.player] = socket.user.username;
           }
-          setTurnDeadline(joined.room);
+          if (joined.player === 'p1' || joined.player === 'p2') {
+            setTurnDeadline(joined.room);
+          }
           send(socket, 'joined', {
             code: joined.room.code,
             player: joined.player,
             state: joined.room.state,
             mode: joined.room.mode,
+            host: joined.room.host || null,
             turnDeadline: joined.room.turnDeadline || null
           });
           broadcast(joined.room, 'room-update', {
             state: joined.room.state,
             event: 'player_joined',
             player: joined.player,
+            host: joined.room.host || null,
             turnDeadline: joined.room.turnDeadline || null
           });
           broadcastRooms();
@@ -1218,8 +1294,8 @@ wss.on('connection', (socket, req) => {
 
           const from = message.from || message.action?.from;
           const to = message.to || message.action?.to;
-          broadcastState(room, outcome, from, to, player);
           setTurnDeadline(room);
+          broadcastState(room, outcome, from, to, player);
           if (room.state.winner) {
             settleOnlineRating(room);
             queueRoomMatchResult(room);
@@ -1251,7 +1327,9 @@ wss.on('connection', (socket, req) => {
           broadcast(room, 'rematch', {
             state: room.state,
             by: player,
-            message: `${player === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'} đã khởi động lại ván đấu!`
+            message: `${player === 'p1' ? 'Đội Đỏ' : 'Đội Xanh'} đã khởi động lại ván đấu!`,
+            host: room.host || null,
+            turnDeadline: room.turnDeadline || null
           });
           return;
         }
@@ -1317,15 +1395,31 @@ wss.on('connection', (socket, req) => {
           }
         }
         const result = rooms.remove(socket);
-        if (result?.room && ['p1', 'p2'].includes(result.disconnectedRole) &&
-            result.room.state.turn === result.disconnectedRole) {
-          clearTimeout(result.room.turnTimer);
-          result.room.turnTimer = null;
-          result.room.turnDeadline = null;
+        if (result?.room && ['p1', 'p2'].includes(result.disconnectedRole)) {
+          setTurnDeadline(result.room);
         }
-        if (result?.empty && result.room) {
+        if (result?.room && rooms.getRoom(result.code) === result.room &&
+            !hasConnectedPlayer(result.room)) {
+          clearTimeout(result.room.cleanupTimer);
           result.room.cleanupTimer = setTimeout(() => {
-            rooms.deleteRoom(result.code);
+            const room = rooms.getRoom(result.code);
+            if (!room) return;
+            if (hasConnectedPlayer(room)) {
+              room.cleanupTimer = null;
+              return;
+            }
+            for (const roomSocket of room.sockets.keys()) {
+              roomSocket.roomCode = null;
+              send(roomSocket, 'room-closed', { code: result.code });
+            }
+            if (rooms.deleteRoom(result.code, { force: true })) {
+              if (roomStateStore) {
+                roomStateStore.deleteRoom(result.code).catch(error => {
+                  console.error(`Could not delete persisted room ${result.code}:`, error.message);
+                });
+              }
+              broadcastRooms();
+            }
           }, 60_000);
           result.room.cleanupTimer.unref();
         }
@@ -1336,6 +1430,8 @@ wss.on('connection', (socket, req) => {
             state: result.room.state,
             event: 'player_left',
             disconnectedRole: result.disconnectedRole,
+            host: result.room.host || null,
+            turnDeadline: result.room.turnDeadline || null,
             message: `${result.disconnectedRole === 'p1' ? 'Đội Đỏ (P1)' : 'Đội Xanh (P2)'} đã thoát phòng.`
           });
         }

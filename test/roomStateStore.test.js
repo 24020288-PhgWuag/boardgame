@@ -78,6 +78,7 @@ test('persists room snapshots without process-local socket or bot objects', asyn
     mode: 'classic',
     createdAt: 123,
     matchResultId: 'match-1',
+    host: 'p1',
     state: { players: { p1: 'alpha', p2: null }, history: [] },
     passwordHash: 'salt:hash',
     sockets: new Map([['socket', 'p1']]),
@@ -89,6 +90,7 @@ test('persists room snapshots without process-local socket or bot objects', asyn
   const [snapshot] = await store.loadRooms();
 
   assert.equal(snapshot.code, room.code);
+  assert.equal(snapshot.host, 'p1');
   assert.equal(snapshot.state.players.p1, 'alpha');
   assert.equal(Object.hasOwn(snapshot, 'sockets'), false);
   assert.equal(redis.published.length, 1);
@@ -101,6 +103,21 @@ test('acquires and releases a Redis room lock', async () => {
 
   await release();
   assert.equal(redis.published.length, 0);
+});
+
+test('deletes a room snapshot and notifies other instances', async () => {
+  const redis = new FakeRedis();
+  const store = new RoomStateStore('redis://unused', { redis, subscriber: new FakeRedis() });
+  redis.values.set('boardgame:room:ABC123', JSON.stringify({ code: 'ABC123' }));
+
+  await store.deleteRoom('abc123');
+
+  assert.equal(await store.get('ABC123'), null);
+  assert.deepEqual(JSON.parse(redis.published[0].value), {
+    kind: 'room-removed',
+    code: 'ABC123',
+    source: store.instanceId
+  });
 });
 
 test('matches queued players across instances by mode and ELO', async () => {

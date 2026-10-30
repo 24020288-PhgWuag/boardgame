@@ -764,6 +764,7 @@ input[type="checkbox"], input[type="radio"] {
 
 .role-tag.is-you { background: var(--sun); color: var(--outline); animation: wiggle 2.4s ease-in-out infinite; }
 .role-tag.is-opponent { background: var(--grape-soft); color: var(--outline); }
+.host-badge { margin-left: 6px; background: var(--sun); color: var(--outline); }
 
 .piece-tracker {
   background: rgba(255, 255, 255, 0.85);
