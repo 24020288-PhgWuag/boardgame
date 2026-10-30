@@ -25,39 +25,51 @@ window.AdminDashboard = (() => {
   async function loadMetrics() {
     const data = await request('/api/admin/metrics');
     const values = [
-      ['WebSocket', data.connections],
-      ['Phòng', data.rooms],
-      ['Phòng có người', data.roomsWithPlayers],
-      ['RAM RSS', `${(data.memory.rssBytes / 1024 / 1024).toFixed(1)} MB`],
-      ['CPU tiến trình', `${data.cpu.percent.toFixed(1)}%`],
-      ['Bot đang chạy', data.botProcesses],
-      ['Uptime', `${Math.floor(data.uptimeSeconds / 60)} phút`]
+      ['🔌', 'WebSocket', data.connections],
+      ['🏠', 'Phòng', data.rooms],
+      ['🎮', 'Phòng có người', data.roomsWithPlayers],
+      ['🧠', 'RAM RSS', `${(data.memory.rssBytes / 1024 / 1024).toFixed(1)} MB`],
+      ['⚡', 'CPU tiến trình', `${data.cpu.percent.toFixed(1)}%`],
+      ['🤖', 'Bot đang chạy', data.botProcesses],
+      ['⏱️', 'Uptime', `${Math.floor(data.uptimeSeconds / 60)} phút`]
     ];
-    metrics.innerHTML = values.map(([label, value]) => `
-      <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
-        <small>${escapeHtml(label)}</small><div style="font-size:1.2rem;font-weight:700">${escapeHtml(value)}</div>
+    metrics.innerHTML = values.map(([icon, label, value]) => `
+      <div class="admin-metric">
+        <span class="admin-metric-icon" aria-hidden="true">${icon}</span>
+        <div>
+          <small>${escapeHtml(label)}</small>
+          <div class="admin-metric-value">${escapeHtml(value)}</div>
+        </div>
       </div>`).join('');
   }
 
   async function loadUsers() {
     const data = await request('/api/admin/users');
     const table = document.createElement('table');
-    table.className = 'standings';
+    table.className = 'admin-table';
     table.innerHTML = '<thead><tr><th>Tài khoản</th><th>Hạng</th><th>ELO</th><th>Thắng / Trận</th><th>Ngày tạo</th></tr></thead>';
     const body = document.createElement('tbody');
     for (const user of data.users) {
       const row = document.createElement('tr');
-      for (const value of [
+      const values = [
         user.username,
-        user.isAdmin ? 'Admin' : user.rank,
+        user.isAdmin ? '🛡️ Admin' : user.rank,
         user.elo,
         `${user.wins}/${user.games}`,
-        user.createdAt
-      ]) {
+        new Date(user.createdAt).toLocaleString('vi-VN')
+      ];
+      values.forEach((value, index) => {
         const cell = document.createElement('td');
-        cell.textContent = value;
+        if (index === 1 && user.isAdmin) {
+          const tag = document.createElement('span');
+          tag.className = 'admin-role-tag';
+          tag.textContent = value;
+          cell.append(tag);
+        } else {
+          cell.textContent = value;
+        }
         row.append(cell);
-      }
+      });
       body.append(row);
     }
     table.append(body);
@@ -67,18 +79,18 @@ window.AdminDashboard = (() => {
   async function loadEvents() {
     const data = await request('/api/community-tournaments');
     events.innerHTML = data.tournaments.length ? data.tournaments.map(event => `
-      <article class="tournament-item">
+      <article class="admin-event">
         <strong>${escapeHtml(event.name)}</strong>
-        <span class="muted"> · ${escapeHtml(event.status)} · ${event.players.length}/12</span>
+        <span class="admin-status-tag">${escapeHtml(event.status)} · ${event.players.length}/12</span>
         <ul>${event.players.map(player =>
-          `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName || 'Đang chờ tải bot')}</li>`
+          `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName || '⏳ Đang chờ tải bot')}</li>`
         ).join('') || '<li class="muted">Chưa có người tham gia.</li>'}</ul>
         ${event.status === 'registration' ? `
           <button type="button" class="secondary-button" data-start-event="${escapeHtml(event.id)}"
             ${event.players.length < 2 || event.players.some(player => !player.botId) ? 'disabled' : ''}>
-            Bắt đầu giải
+            🚀 Bắt đầu giải
           </button>` : ''}
-      </article>`).join('') : '<p class="muted">Chưa có giải cộng đồng.</p>';
+      </article>`).join('') : '<p class="muted">Chưa có giải cộng đồng. Hãy tạo giải đầu tiên! 🎈</p>';
   }
 
   async function refresh() {
@@ -98,7 +110,7 @@ window.AdminDashboard = (() => {
     if (!refreshTimer) refreshTimer = setInterval(() => {
       refresh().catch(error => { status.textContent = error.message; });
     }, 5000);
-    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('admin-dashboard-close').focus();
   }
 
   function hide() {
@@ -107,6 +119,7 @@ window.AdminDashboard = (() => {
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
+    if (isAdmin) toggleButton.focus();
   }
 
   function setRole(user) {
@@ -114,7 +127,6 @@ window.AdminDashboard = (() => {
     toggleButton.classList.toggle('hidden', !nextIsAdmin);
     if (isAdmin && !nextIsAdmin) hide();
     isAdmin = nextIsAdmin;
-    if (isAdmin) show();
   }
 
   toggleButton.addEventListener('click', () => {
@@ -122,6 +134,12 @@ window.AdminDashboard = (() => {
     else hide();
   });
   document.getElementById('admin-dashboard-close').addEventListener('click', hide);
+  panel.addEventListener('click', event => {
+    if (event.target === panel) hide();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !panel.classList.contains('hidden')) hide();
+  });
 
   document.getElementById('admin-dashboard-create-event').addEventListener('submit', async event => {
     event.preventDefault();

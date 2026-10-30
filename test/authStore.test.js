@@ -47,6 +47,20 @@ test('provisions a separate Admin account and rotates its configured password', 
   }
 });
 
+test('keeps the Admin account out of the player leaderboard', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'boardgame-admin-'));
+  const store = new AuthStore(path.join(directory, 'users.sqlite'));
+  try {
+    store.provisionAdminAccount('site-admin', 'admin-password-1');
+    store.createUser('player-one', 'player-password');
+
+    assert.deepEqual(store.getLeaderboard().map(player => player.username), ['player-one']);
+  } finally {
+    store.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('does not promote a normal account to Admin during provisioning', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'boardgame-admin-'));
   const store = new AuthStore(path.join(directory, 'users.sqlite'));

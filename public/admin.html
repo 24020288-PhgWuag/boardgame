@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OTT V2 // Quản trị</title>
   <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/playful.css">
 </head>
 <body>
   <main class="app-shell">
@@ -14,15 +15,15 @@
     </header>
     <section class="lobby-panel" style="margin:40px auto; max-width:900px;">
       <p class="eyebrow">QUẢN TRỊ</p>
-      <h1>Giám sát hệ thống</h1>
+      <h1>📊 Giám sát hệ thống</h1>
       <p id="metrics-status" class="message" aria-live="polite">Đang tải metrics…</p>
       <div id="system-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px"></div>
       <hr style="margin:28px 0;border:0;border-top:1px solid var(--line)">
-      <h1>Người chơi</h1>
+      <h1>👥 Người chơi</h1>
       <p id="admin-message" class="message"></p>
       <div id="admin-users"></div>
       <hr style="margin:28px 0;border:0;border-top:1px solid var(--line)">
-      <h2>Tạo giải cộng đồng</h2>
+      <h2>🎪 Tạo giải cộng đồng</h2>
       <form id="community-create" style="display:grid;gap:10px;max-width:460px">
         <input id="community-name" placeholder="Tên giải" maxlength="60" required>
         <select id="community-mode"><option value="army">9v9 Đại chiến</option><option value="tactical">6v6 Chiến thuật</option><option value="classic">3v3 Nhanh</option></select>

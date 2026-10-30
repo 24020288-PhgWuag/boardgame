@@ -158,9 +158,20 @@ trang hoặc API quản trị. Đổi `ADMIN_PASSWORD` rồi khởi động lạ
 Hãy dùng tên tài khoản Admin chưa được tài khoản người chơi đăng ký; server sẽ
 từ chối tự nâng quyền một tài khoản thường. Không đưa mật khẩu thật vào Git.
 Đăng nhập Admin ngay trong hộp thoại đăng nhập ở trang chơi cũng được; sau khi
-đăng nhập, nút **Quản trị** xuất hiện trên thanh đầu trang và mở dashboard ngay
-trong giao diện game. Dashboard hiển thị metrics, danh sách tài khoản và cho
-phép tạo/bắt đầu giải cộng đồng.
+đăng nhập, nút **🛡️ Quản trị** xuất hiện trên thanh đầu trang và mở popup quản trị
+ngay trong giao diện game (đóng bằng nút ✕, phím `Esc` hoặc bấm ra ngoài popup).
+Popup hiển thị metrics, danh sách tài khoản và cho phép tạo/bắt đầu giải cộng
+đồng. Tài khoản Admin không xuất hiện trên bảng xếp hạng người chơi.
+
+### Giao diện hoạt hình (playful cartoon)
+
+Toàn bộ trang (sảnh, bàn cờ, giải đấu, replay, đăng nhập Admin và popup quản trị)
+dùng chung theme trong `public/css/playful.css`, được nạp sau cùng trong mỗi
+trang HTML để ghi đè style nền. Theme dùng font Fredoka/Baloo 2 (có fallback hệ
+thống khi offline), bảng màu pastel, nút 3D có viền đậm, hiệu ứng nảy khi hover/click
+và linh vật SVG tại `public/assets/stickers/mascot.svg`. Hiệu ứng chuyển động tự
+giảm xuống mức tối thiểu khi hệ điều hành bật `prefers-reduced-motion`. Muốn đổi
+màu, chỉnh các biến `--mint`, `--orange`, `--sun`, `--pink`, `--outline`... ở đầu file.
 
 Bot chỉ gửi một hành động đã thử. Server vẫn giữ trạng thái thật, kiểm tra luật,
 áp dụng nước đi và xác định người thắng.

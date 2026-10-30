@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Linh vật Oẳn Tù Tì">
+  <ellipse cx="60" cy="113" rx="30" ry="5" fill="#2d1b4e" opacity=".18"/>
+  <path d="M34 34 L28 10 L52 24 Z" fill="#ff9f43" stroke="#2d1b4e" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M86 34 L92 10 L68 24 Z" fill="#ff9f43" stroke="#2d1b4e" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="60" cy="64" r="46" fill="#ffd93d" stroke="#2d1b4e" stroke-width="5"/>
+  <ellipse cx="34" cy="78" rx="9" ry="6" fill="#ff8fa3"/>
+  <ellipse cx="86" cy="78" rx="9" ry="6" fill="#ff8fa3"/>
+  <circle cx="45" cy="58" r="9" fill="#fff" stroke="#2d1b4e" stroke-width="4"/>
+  <circle cx="75" cy="58" r="9" fill="#fff" stroke="#2d1b4e" stroke-width="4"/>
+  <circle cx="47" cy="59" r="4" fill="#2d1b4e"/>
+  <circle cx="73" cy="59" r="4" fill="#2d1b4e"/>
+  <circle cx="48.5" cy="57" r="1.5" fill="#fff"/>
+  <circle cx="74.5" cy="57" r="1.5" fill="#fff"/>
+  <path d="M44 78 Q60 98 76 78 Z" fill="#ff5d73" stroke="#2d1b4e" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M52 86 Q60 92 68 86 Q60 82 52 86 Z" fill="#fff" opacity=".9"/>
+</svg>

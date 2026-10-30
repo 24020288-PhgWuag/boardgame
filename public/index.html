@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/css/board.css">
   <link rel="stylesheet" href="/css/animations.css">
   <link rel="stylesheet" href="/css/modal.css">
+  <link rel="stylesheet" href="/css/playful.css">
 </head>
 <body>
   <main class="app-shell">
@@ -151,39 +152,51 @@
       </div>
     </section>
 
-    <section id="admin-dashboard" class="lobby-panel hidden" style="margin:24px auto;max-width:1100px;width:100%">
-      <div class="open-rooms-header">
-        <div>
-          <div class="panel-kicker">KHU VỰC ADMIN</div>
-          <h2>Quản trị hệ thống</h2>
+    <div id="admin-dashboard" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="admin-dashboard-title">
+      <div class="modal-card admin-modal-card">
+        <button id="admin-dashboard-close" class="modal-close-btn" type="button" aria-label="Đóng bảng quản trị">✕</button>
+        <div class="admin-modal-head">
+          <div class="admin-mascot" aria-hidden="true"></div>
+          <div>
+            <p class="eyebrow">🛡️ KHU VỰC ADMIN</p>
+            <h2 id="admin-dashboard-title">Phòng điều khiển</h2>
+          </div>
         </div>
-        <button id="admin-dashboard-close" class="nav-btn" type="button">Thu gọn</button>
+        <p id="admin-dashboard-status" class="message" aria-live="polite"></p>
+        <section class="admin-section">
+          <h3>📊 Sức khỏe hệ thống</h3>
+          <div id="admin-dashboard-metrics" class="admin-metrics"></div>
+        </section>
+        <section class="admin-section">
+          <h3>👥 Người chơi</h3>
+          <div id="admin-dashboard-users" class="admin-table-wrap"></div>
+        </section>
+        <section class="admin-section admin-split">
+          <form id="admin-dashboard-create-event" class="admin-form">
+            <h3>🎪 Tạo giải cộng đồng</h3>
+            <label>Tên giải
+              <input name="name" maxlength="60" placeholder="Giải Bot Cuối Tuần" required>
+            </label>
+            <label>Chế độ quân
+              <select name="mode">
+                <option value="army">🚀 9v9 Đại chiến</option>
+                <option value="tactical">🎯 6v6 Chiến thuật</option>
+                <option value="classic">🍀 3v3 Nhanh</option>
+              </select>
+            </label>
+            <label>Giới hạn lượt mỗi trận
+              <input name="maxTurns" type="number" min="20" max="2000" value="300" required>
+            </label>
+            <button class="primary-button" type="submit">🎈 Tạo giải đăng ký</button>
+            <p id="admin-dashboard-event-status" class="message" aria-live="polite"></p>
+          </form>
+          <div>
+            <h3>🏆 Giải cộng đồng</h3>
+            <div id="admin-dashboard-events" class="admin-events"></div>
+          </div>
+        </section>
       </div>
-      <p id="admin-dashboard-status" class="message" aria-live="polite"></p>
-      <div id="admin-dashboard-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px"></div>
-      <details style="margin-top:20px">
-        <summary>Danh sách tài khoản người chơi</summary>
-        <div id="admin-dashboard-users" style="overflow:auto;margin-top:12px"></div>
-      </details>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:24px">
-        <form id="admin-dashboard-create-event" style="display:grid;align-content:start;gap:10px">
-          <h3>Tạo giải cộng đồng</h3>
-          <input name="name" maxlength="60" placeholder="Tên giải" required>
-          <select name="mode">
-            <option value="army">9v9 Đại chiến</option>
-            <option value="tactical">6v6 Chiến thuật</option>
-            <option value="classic">3v3 Nhanh</option>
-          </select>
-          <input name="maxTurns" type="number" min="20" max="2000" value="300" required>
-          <button class="primary-button" type="submit">Tạo giải đăng ký</button>
-          <p id="admin-dashboard-event-status" class="message" aria-live="polite"></p>
-        </form>
-        <div>
-          <h3>Giải cộng đồng</h3>
-          <div id="admin-dashboard-events" class="rooms-list"></div>
-        </div>
-      </div>
-    </section>
+    </div>
 
     <!-- 2. GAME VIEW -->
     <section id="game" class="game-view hidden">

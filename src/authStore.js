@@ -242,7 +242,7 @@ class AuthStore {
   }
 
   getLeaderboard(limit = 50) {
-    return this.database.prepare('SELECT * FROM users ORDER BY elo DESC, wins DESC, username ASC LIMIT ?')
+    return this.database.prepare('SELECT * FROM users WHERE is_admin = 0 ORDER BY elo DESC, wins DESC, username ASC LIMIT ?')
       .all(limit).map((row, index) => ({ ...this.publicUser(this.rowToUser(row)), position: index + 1 }));
   }
 
