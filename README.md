@@ -368,9 +368,16 @@ bắt đầu khi có từ 2 đến 20 người; giải cộng đồng chạy Swi
 Thông tin giải cộng đồng được lưu tại `matches/tournaments/community-events.json`;
 file bot bất biến và metadata chủ sở hữu nằm trong `bots/submissions/`.
 
-### Nhập và chạy giải offline từ Google Forms
+### Quy trình nộp bot và chạy giải
 
-Khi học sinh nộp bot qua Google Form, admin tải các file `.py` về một thư mục rồi chạy:
+- **Tải bot lên:** [Google Form](https://docs.google.com/forms/d/e/1FAIpQLSf6yghHJRi5nmdOo5QAiQAGnu7JhBNuoXRx7fPYipF31doONA/viewform?usp=sharing&ouid=110284869596744521995)
+- **Xem kết quả:** [Bảng kết quả](https://docs.google.com/spreadsheets/d/1AQsnAoWM2h1l1KnF0YTUzgFSlW-Tb8HpIzFUxRJlpIY/edit?usp=sharing)
+
+Quy trình: học sinh nộp bot qua Google Form; admin tải tất cả file đã nộp xuống, sau đó đăng nhập vào website, mở **🏆 Bot Tournament** và tải các file `.py` lên trang để chạy giải. Xem hướng dẫn tại mục **Giải đấu bot** phía trên. Kết quả được xem tại bảng Google Sheets ở trên.
+
+### Chạy giải offline từ Google Forms (tùy chọn)
+
+Nếu muốn chạy giải offline bằng dòng lệnh thay vì tải bot lên website, admin tải các file `.py` về một thư mục rồi chạy:
 
 ```powershell
 npm run bot:batch -- C:\path\to\submissions --metadata C:\path\to\responses.csv --mode army --max-turns 300 --pool-size 20
