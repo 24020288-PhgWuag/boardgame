@@ -640,7 +640,11 @@
     }
 
     function updateRoomHost(host) {
+      const previousHost = roomHost;
       roomHost = ['p1', 'p2'].includes(host) ? host : null;
+      if (previousHost && roomHost === player && previousHost !== player) {
+        showToast('Chủ phòng đã rời đi, bạn là chủ phòng mới!', 'info');
+      }
       $('p1-host-badge').classList.toggle('hidden', roomHost !== 'p1');
       $('p2-host-badge').classList.toggle('hidden', roomHost !== 'p2');
     }
@@ -916,13 +920,10 @@
       });
     }
 
-    // A just-left room is hidden briefly so a stale list can't show it again.
-    const leftRoomCodes = new Map();
     function renderPublicRooms(rooms) {
       const listEl = $('open-rooms-list');
       const cardEl = $('open-rooms-card');
-      rooms = (rooms || []).filter(room => (leftRoomCodes.get(room.code) || 0) <= Date.now());
-      if (!rooms.length) {
+      if (!rooms || !rooms.length) {
         cardEl.classList.add('hidden');
         return;
       }
@@ -1078,20 +1079,16 @@
       $('game').classList.add('hidden');
       $('lobby').classList.remove('hidden');
       $('result-modal').classList.add('hidden');
-      const leftCode = $('room-code-display').textContent.trim();
-      if (leftCode) leftRoomCodes.set(leftCode, Date.now() + 3000);
-      $('open-rooms-card').classList.add('hidden');
       const activeNetwork = network;
       network = null;
-      const leaving = activeNetwork?.leaveRoom();
-      connectOnline();
       try {
-        await leaving;
-        if (network?.connected) network.send('list_rooms');
+        await activeNetwork?.leaveRoom();
       } catch (error) {
         console.error('Could not confirm leaving the room:', error);
       } finally {
         activeNetwork?.stop();
+        // Connect only after the server processed the leave so the room list is fresh.
+        connectOnline();
         leaveButton.disabled = false;
       }
     };
