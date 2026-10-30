@@ -2,6 +2,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+const MAX_ROUND_ROBIN_BOTS = 12;
+const MAX_KNOCKOUT_BOTS = 10000;
+
 class TournamentManager {
   constructor(directory, options) {
     this.directory = directory;
@@ -55,8 +58,9 @@ class TournamentManager {
   }
 
   create({ name, botIds, mode, maxTurns, format = 'round-robin-two-legs' }) {
-    if (!Array.isArray(botIds) || botIds.length < 2 || botIds.length > 12) {
-      throw new Error('Hãy chọn từ 2 đến 12 bot.');
+    const maxBots = format === 'single-elimination' ? MAX_KNOCKOUT_BOTS : MAX_ROUND_ROBIN_BOTS;
+    if (!Array.isArray(botIds) || botIds.length < 2 || botIds.length > maxBots) {
+      throw new Error(`Hãy chọn từ 2 đến ${maxBots} bot.`);
     }
     if (new Set(botIds).size !== botIds.length) throw new Error('Mỗi bot chỉ được chọn một lần.');
     const tournamentId = crypto.randomUUID();

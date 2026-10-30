@@ -27,6 +27,7 @@
       <form id="community-create" style="display:grid;gap:10px;max-width:460px">
         <input id="community-name" placeholder="Tên giải" maxlength="60" required>
         <select id="community-mode"><option value="army">9v9 Đại chiến</option><option value="tactical">6v6 Chiến thuật</option><option value="classic">3v3 Nhanh</option></select>
+        <input id="community-players" type="number" min="2" max="10000" step="1" value="12" title="Số người tham gia (2–10000)" required>
         <input id="community-turns" type="number" min="20" max="2000" value="300">
         <button class="primary-button">Tạo giải đăng ký</button>
       </form>
@@ -92,9 +93,9 @@
       if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
       document.getElementById('community-events').innerHTML = data.tournaments.map(event => `
         <div style="border:1px solid var(--line);padding:14px;margin-top:12px;border-radius:8px">
-          <strong>${escapeHtml(event.name)}</strong> · ${escapeHtml(event.status)} · ${event.players.length}/12 người
+          <strong>${escapeHtml(event.name)}</strong> · ${escapeHtml(event.status)} · ${event.players.length}/${event.maxPlayers || 12} người
           ${event.status === 'registration' ? `<button data-start="${escapeHtml(event.id)}" class="secondary-button" style="float:right" ${event.players.length < 2 || event.players.some(player => !player.botId) ? 'disabled' : ''}>Bắt đầu</button>` : ''}
-          <div>${event.players.map(player => `${escapeHtml(player.username)} — ${escapeHtml(player.botName || 'Đang chờ tải bot')}`).join('<br>') || 'Chưa có người đăng ký'}</div>
+          <div>${event.players.slice(0, 50).map(player => `${escapeHtml(player.username)} — ${escapeHtml(player.botName || 'Đang chờ tải bot')}`).join('<br>') || 'Chưa có người đăng ký'}${event.players.length > 50 ? `<br><small class="muted">… và ${event.players.length - 50} người khác</small>` : ''}</div>
           ${event.status === 'registration' && event.players.some(player => !player.botId) ? '<small class="muted">Chưa thể bắt đầu: cần mọi người tham gia tải bot lên.</small>' : ''}
           ${event.champion ? `<strong>🏆 ${escapeHtml(event.champion)}</strong>` : ''}
         </div>`).join('');
@@ -110,7 +111,8 @@
       const response = await fetch('/api/community-tournaments', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
         name: document.getElementById('community-name').value,
         mode: document.getElementById('community-mode').value,
-        maxTurns: Number(document.getElementById('community-turns').value)
+        maxTurns: Number(document.getElementById('community-turns').value),
+        maxPlayers: Number(document.getElementById('community-players').value)
       })});
       const data = await response.json();
       document.getElementById('community-message').textContent = data.error || 'Đã tạo giải.';

@@ -2,6 +2,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 10000;
+const DEFAULT_MAX_PLAYERS = 12;
+
 class CommunityTournamentManager {
   constructor(filePath, { startTournament }) {
     this.filePath = filePath;
@@ -27,13 +31,13 @@ class CommunityTournamentManager {
     fs.renameSync(temporary, this.filePath);
   }
 
-  create({ name, mode, maxTurns }) {
+  create({ name, mode, maxTurns, maxPlayers = DEFAULT_MAX_PLAYERS }) {
     const event = {
       id: crypto.randomUUID(),
       name: String(name || '').trim().slice(0, 60) || 'Giải vô địch cộng đồng',
       mode,
       maxTurns,
-      maxPlayers: 12,
+      maxPlayers,
       status: 'registration',
       players: [],
       tournamentId: null,
@@ -62,7 +66,7 @@ class CommunityTournamentManager {
     if (!event) return { error: 'Không tìm thấy giải cộng đồng.' };
     if (event.status !== 'registration') return { error: 'Giải này đã đóng đăng ký.' };
     if (event.players.some(item => item.userId === player.userId)) return { error: 'Mỗi tài khoản chỉ được đăng ký một bot.' };
-    if (event.players.length >= event.maxPlayers) return { error: 'Giải đã đủ 12 người chơi.' };
+    if (event.players.length >= event.maxPlayers) return { error: `Giải đã đủ ${event.maxPlayers} người chơi.` };
     event.players.push({ ...player, botId: null, botName: null, registeredAt: new Date().toISOString() });
     event.updatedAt = new Date().toISOString();
     this.save();
@@ -115,18 +119,22 @@ class CommunityTournamentManager {
   }
 
   sync() {
+    let changed = false;
     for (const event of this.events) {
-      if (!event.tournamentId) continue;
+      if (!event.tournamentId || event.status === 'completed') continue;
       const tournament = this.startTournament.read(event.tournamentId);
       if (!tournament) continue;
       if (tournament.status === 'completed') {
         event.status = 'completed';
         event.champion = tournament.champion || null;
         event.updatedAt = new Date().toISOString();
+        changed = true;
       }
     }
-    this.save();
+    if (changed) this.save();
   }
 }
 
 module.exports = CommunityTournamentManager;
+module.exports.MIN_PLAYERS = MIN_PLAYERS;
+module.exports.MAX_PLAYERS = MAX_PLAYERS;

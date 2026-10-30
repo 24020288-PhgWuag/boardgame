@@ -48,6 +48,23 @@ test('players join first, upload a bot later, and only complete entries can star
   }
 });
 
+test('event capacity is configurable and enforced', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'boardgame-community-'));
+  const manager = new CommunityTournamentManager(path.join(directory, 'events.json'), {
+    startTournament: () => ({ id: 'unused' })
+  });
+  try {
+    const event = manager.create({ name: 'Big', mode: 'classic', maxTurns: 100, maxPlayers: 2 });
+    assert.equal(event.maxPlayers, 2);
+    manager.register(event.id, { userId: 'u1', username: 'a' });
+    manager.register(event.id, { userId: 'u2', username: 'b' });
+    assert.match(manager.register(event.id, { userId: 'u3', username: 'c' }).error, /đủ 2 người/);
+    assert.equal(manager.create({ name: 'Default', mode: 'classic', maxTurns: 100 }).maxPlayers, 12);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('public event listing does not expose uploaded bot source', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'boardgame-community-'));
   const manager = new CommunityTournamentManager(path.join(directory, 'events.json'), {

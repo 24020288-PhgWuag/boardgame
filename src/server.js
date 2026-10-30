@@ -319,7 +319,14 @@ app.post('/api/community-tournaments', requireAdmin, (req, res) => {
   if (!Number.isInteger(maxTurns) || maxTurns < 20 || maxTurns > 2000) {
     return res.status(400).json({ error: 'Giới hạn lượt phải từ 20 đến 2000.' });
   }
-  res.status(201).json({ tournament: communityTournaments.create({ name: req.body?.name, mode, maxTurns }) });
+  const maxPlayers = Number(req.body?.maxPlayers ?? 12);
+  if (!Number.isInteger(maxPlayers) || maxPlayers < CommunityTournamentManager.MIN_PLAYERS ||
+    maxPlayers > CommunityTournamentManager.MAX_PLAYERS) {
+    return res.status(400).json({
+      error: `Số người tham gia phải từ ${CommunityTournamentManager.MIN_PLAYERS} đến ${CommunityTournamentManager.MAX_PLAYERS}.`
+    });
+  }
+  res.status(201).json({ tournament: communityTournaments.create({ name: req.body?.name, mode, maxTurns, maxPlayers }) });
 });
 
 app.post('/api/community-tournaments/:id/register', (req, res) => {

@@ -211,7 +211,7 @@
           action = `<p class="muted">Bạn đã đăng ký bot <strong>${escapeHtml(player.botName)}</strong>.</p>`;
         }
         return `<article class="tournament-item">
-          <div class="tournament-status">${escapeHtml(event.status)} · ${event.players.length}/12 người</div>
+          <div class="tournament-status">${escapeHtml(event.status)} · ${event.players.length}/${event.maxPlayers || 12} người</div>
           <h3>${escapeHtml(event.name)}</h3>
           <div class="tournament-meta">Đấu loại trực tiếp · tối đa ${event.maxTurns} lượt/trận</div>
           <ul>${registered || '<li class="muted">Chưa có người đăng ký.</li>'}</ul>

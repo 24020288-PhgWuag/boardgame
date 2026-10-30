@@ -81,10 +81,11 @@ window.AdminDashboard = (() => {
     events.innerHTML = data.tournaments.length ? data.tournaments.map(event => `
       <article class="admin-event">
         <strong>${escapeHtml(event.name)}</strong>
-        <span class="admin-status-tag">${escapeHtml(event.status)} · ${event.players.length}/12</span>
-        <ul>${event.players.map(player =>
+        <span class="admin-status-tag">${escapeHtml(event.status)} ·         ${event.players.length}/${event.maxPlayers || 12}</span>
+                <ul>${event.players.slice(0, 50).map(player =>
           `<li>${escapeHtml(player.username)} — ${escapeHtml(player.botName || '⏳ Đang chờ tải bot')}</li>`
-        ).join('') || '<li class="muted">Chưa có người tham gia.</li>'}</ul>
+                ).join('') || '<li class="muted">Chưa có người tham gia.</li>'}${event.players.length > 50
+                  ? `<li class="muted">… và ${event.players.length - 50} người khác</li>` : ''}</ul>
         ${event.status === 'registration' ? `
           <button type="button" class="secondary-button" data-start-event="${escapeHtml(event.id)}"
             ${event.players.length < 2 || event.players.some(player => !player.botId) ? 'disabled' : ''}>
@@ -154,7 +155,8 @@ window.AdminDashboard = (() => {
         body: JSON.stringify({
           name: form.elements.name.value,
           mode: form.elements.mode.value,
-          maxTurns: Number(form.elements.maxTurns.value)
+          maxTurns: Number(form.elements.maxTurns.value),
+          maxPlayers: Number(form.elements.maxPlayers.value)
         })
       });
       form.reset();

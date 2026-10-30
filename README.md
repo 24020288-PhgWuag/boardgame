@@ -386,10 +386,11 @@ Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi kh�
 
 ### Giải cộng đồng do admin tổ chức
 
-Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 12 suất. Người chơi
+Admin mở `/admin.html`, tạo một giải đăng ký và chọn số suất tối đa từ 2 đến
+10000 (mặc định 12). Người chơi
 đăng nhập rồi mở `/tournaments.html`, bấm **Tham gia giải** để giữ suất trước;
-sau đó tải bot lên cho suất của mình. Admin chỉ bắt đầu được khi có từ 2 đến
-12 người và tất cả đã tải bot. Mỗi tài khoản chỉ được tham gia một lần trong
+sau đó tải bot lên cho suất của mình. Admin chỉ bắt đầu được khi có ít nhất 2
+người (tối đa bằng số suất của giải) và tất cả đã tải bot. Mỗi tài khoản chỉ được tham gia một lần trong
 mỗi giải; một bot cũng không thể được đăng ký bởi hai người. Hệ thống tự tạo
 bracket loại trực tiếp và hiển thị tiến độ, danh sách người chơi và nhà vô địch.
 
