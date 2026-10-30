@@ -62,12 +62,37 @@ class CommunityTournamentManager {
     if (!event) return { error: 'Không tìm thấy giải cộng đồng.' };
     if (event.status !== 'registration') return { error: 'Giải này đã đóng đăng ký.' };
     if (event.players.some(item => item.userId === player.userId)) return { error: 'Mỗi tài khoản chỉ được đăng ký một bot.' };
-    if (event.players.some(item => item.botId === player.botId)) return { error: 'Bot này đã được đăng ký trong giải.' };
     if (event.players.length >= event.maxPlayers) return { error: 'Giải đã đủ 12 người chơi.' };
-    event.players.push({ ...player, registeredAt: new Date().toISOString() });
+    event.players.push({ ...player, botId: null, botName: null, registeredAt: new Date().toISOString() });
     event.updatedAt = new Date().toISOString();
     this.save();
     return { event };
+  }
+
+  canSubmitBot(id, userId) {
+    const event = this.get(id);
+    if (!event) return { error: 'Không tìm thấy giải cộng đồng.' };
+    if (event.status !== 'registration') return { error: 'Giải này đã đóng đăng ký.' };
+    const player = event.players.find(item => item.userId === userId);
+    if (!player) return { error: 'Hãy bấm Tham gia giải trước khi tải bot lên.' };
+    if (player.botId) return { error: 'Bạn đã tải bot cho giải này rồi.' };
+    return { event, player };
+  }
+
+  submitBot(id, userId, bot) {
+    const registration = this.canSubmitBot(id, userId);
+    if (registration.error) return registration;
+    if (registration.event.players.some(item => item.botId === bot.botId)) {
+      return { error: 'Bot này đã được đăng ký trong giải.' };
+    }
+    Object.assign(registration.player, {
+      botId: bot.botId,
+      botName: bot.botName,
+      submittedAt: new Date().toISOString()
+    });
+    registration.event.updatedAt = new Date().toISOString();
+    this.save();
+    return { event: registration.event };
   }
 
   start(id) {
@@ -75,6 +100,9 @@ class CommunityTournamentManager {
     if (!event) return { error: 'Không tìm thấy giải cộng đồng.' };
     if (event.status !== 'registration') return { error: 'Giải đã được bắt đầu hoặc đã kết thúc.' };
     if (event.players.length < 2) return { error: 'Cần ít nhất 2 bot để bắt đầu giải.' };
+    if (event.players.some(player => !player.botId)) {
+      return { error: 'Tất cả người tham gia phải tải bot lên trước khi bắt đầu giải.' };
+    }
     event.status = 'starting';
     event.updatedAt = new Date().toISOString();
     this.save();

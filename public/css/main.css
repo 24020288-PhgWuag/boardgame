@@ -987,4 +987,15 @@ button:active {
   .player-card {
     width: 100%;
   }
+  .topbar {
+    height: auto;
+    min-height: 80px;
+    gap: 12px;
+    padding: 12px 8px;
+  }
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 }

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OTT V2 // Admin đăng nhập</title>
+  <link rel="stylesheet" href="/css/main.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Về sảnh chính">
+        <span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong>
+      </a>
+      <a class="secondary-button" href="/">Về sảnh người chơi</a>
+    </header>
+    <section class="lobby-panel" style="margin:40px auto;max-width:460px;width:100%">
+      <p class="eyebrow">KHU VỰC QUẢN TRỊ RIÊNG</p>
+      <h1>Đăng nhập Admin</h1>
+      <p class="muted">Tài khoản người chơi thông thường không thể truy cập khu vực này.</p>
+      <form id="admin-login-form" style="display:grid;gap:14px">
+        <label>Tên tài khoản Admin
+          <input id="admin-username" name="username" autocomplete="username" required minlength="3" maxlength="24">
+        </label>
+        <label>Mật khẩu
+          <input id="admin-password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+        </label>
+        <button id="admin-submit" class="primary-button" type="submit">Đăng nhập quản trị</button>
+      </form>
+      <p id="admin-login-message" class="message" aria-live="polite"></p>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById('admin-login-form');
+    const message = document.getElementById('admin-login-message');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = document.getElementById('admin-submit');
+      button.disabled = true;
+      message.textContent = '';
+      try {
+        const response = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: form.elements.username.value.trim(),
+            password: form.elements.password.value
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Đăng nhập Admin thất bại.');
+        location.replace('/');
+      } catch (error) {
+        message.textContent = error.message;
+        message.className = 'message error';
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

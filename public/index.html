@@ -26,6 +26,7 @@
           <button id="logout-btn" class="nav-btn" type="button">Đăng xuất</button>
         </div>
         <button id="auth-btn" class="nav-btn" type="button">Đăng nhập</button>
+        <button id="admin-dashboard-btn" class="nav-btn hidden" type="button">🛡️ Quản trị</button>
         <button id="rules-btn" class="nav-btn" type="button" title="Xem luật chơi">
           <span>📖</span> Luật chơi
         </button>
@@ -146,6 +147,40 @@
           <div id="leaderboard-list" class="leaderboard-list">
             <p class="leaderboard-empty">Đang tải bảng xếp hạng...</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="admin-dashboard" class="lobby-panel hidden" style="margin:24px auto;max-width:1100px;width:100%">
+      <div class="open-rooms-header">
+        <div>
+          <div class="panel-kicker">KHU VỰC ADMIN</div>
+          <h2>Quản trị hệ thống</h2>
+        </div>
+        <button id="admin-dashboard-close" class="nav-btn" type="button">Thu gọn</button>
+      </div>
+      <p id="admin-dashboard-status" class="message" aria-live="polite"></p>
+      <div id="admin-dashboard-metrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px"></div>
+      <details style="margin-top:20px">
+        <summary>Danh sách tài khoản người chơi</summary>
+        <div id="admin-dashboard-users" style="overflow:auto;margin-top:12px"></div>
+      </details>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:24px">
+        <form id="admin-dashboard-create-event" style="display:grid;align-content:start;gap:10px">
+          <h3>Tạo giải cộng đồng</h3>
+          <input name="name" maxlength="60" placeholder="Tên giải" required>
+          <select name="mode">
+            <option value="army">9v9 Đại chiến</option>
+            <option value="tactical">6v6 Chiến thuật</option>
+            <option value="classic">3v3 Nhanh</option>
+          </select>
+          <input name="maxTurns" type="number" min="20" max="2000" value="300" required>
+          <button class="primary-button" type="submit">Tạo giải đăng ký</button>
+          <p id="admin-dashboard-event-status" class="message" aria-live="polite"></p>
+        </form>
+        <div>
+          <h3>Giải cộng đồng</h3>
+          <div id="admin-dashboard-events" class="rooms-list"></div>
         </div>
       </div>
     </section>
@@ -307,9 +342,9 @@
   <div id="auth-modal" class="modal hidden">
     <div class="modal-card auth-modal-card">
       <button id="close-auth-btn" class="modal-close-btn" type="button">✕</button>
-      <p class="eyebrow">TÀI KHOẢN NGƯỜI CHƠI</p>
+      <p class="eyebrow">TÀI KHOẢN NGƯỜI CHƠI / ADMIN</p>
       <h2 id="auth-title">Đăng nhập</h2>
-      <p class="modal-reason">Đăng nhập để tạo phòng và lưu danh tính trong các trận đấu online.</p>
+      <p class="modal-reason">Đăng nhập người chơi để vào trận. Tài khoản Admin sẽ mở thêm dashboard quản trị trên giao diện này.</p>
       <form id="auth-form" class="auth-form">
         <label>Tên tài khoản
           <input id="auth-username-input" required minlength="3" maxlength="24" autocomplete="username">
@@ -462,6 +497,7 @@
   <script src="/js/boardView.js"></script>
   <script src="/js/clientNetwork.js"></script>
   <script src="/js/auth.js"></script>
+  <script src="/js/adminDashboard.js"></script>
 
   <!-- Main Game Client Script -->
   <script>
@@ -1183,6 +1219,7 @@
     function updateAuthUI(user) {
       $('auth-user').classList.toggle('hidden', !user);
       $('auth-btn').classList.toggle('hidden', Boolean(user));
+      window.AdminDashboard.setRole(user);
       if (user) {
         const elo = Number(user.elo);
         $('profile-btn').textContent = `👤 ${user.username} · ${Number.isFinite(elo) && elo >= 0 ? elo : 100} ELO`;

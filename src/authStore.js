@@ -118,6 +118,7 @@ class AuthStore {
     return {
       id: user.id,
       username: user.username,
+      isAdmin: Boolean(user.isAdmin),
       elo: this.numberOrDefault(user.elo, 100),
       games: this.numberOrDefault(user.games, 0),
       wins: this.numberOrDefault(user.wins, 0),
@@ -158,8 +159,46 @@ class AuthStore {
     return { user: this.publicUser(user) };
   }
 
+  provisionAdminAccount(username, password) {
+    const normalized = String(username || '').trim();
+    const error = this.validateCredentials(normalized, password);
+    if (error) return { error };
+
+    const existing = this.database.prepare('SELECT * FROM users WHERE username = ?').get(normalized);
+    if (existing && !existing.is_admin) {
+      return { error: 'Tên tài khoản Admin đã thuộc về tài khoản người dùng. Hãy chọn tên Admin khác.' };
+    }
+
+    if (existing) {
+      if (!this.verifyPassword(password, existing.password_hash)) {
+        this.database.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+          .run(this.hashPassword(password), existing.id);
+      }
+      return { user: this.publicUser(this.rowToUser(this.database.prepare('SELECT * FROM users WHERE id = ?').get(existing.id))) };
+    }
+
+    const user = {
+      id: crypto.randomUUID(),
+      username: normalized,
+      passwordHash: this.hashPassword(password),
+      elo: 100,
+      games: 0,
+      wins: 0,
+      createdAt: new Date().toISOString()
+    };
+    this.database.prepare(`
+      INSERT INTO users (id, username, password_hash, created_at, is_admin)
+      VALUES (?, ?, ?, ?, 1)
+    `).run(user.id, user.username, user.passwordHash, user.createdAt);
+    return { user: this.publicUser({ ...user, isAdmin: true }) };
+  }
+
   authenticate(username, password) {
-    const row = this.database.prepare('SELECT * FROM users WHERE username = ?').get(String(username).trim());
+    if (typeof username !== 'string' || !USERNAME_PATTERN.test(username.trim()) ||
+        typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH || password.length > 128) {
+      return null;
+    }
+    const row = this.database.prepare('SELECT * FROM users WHERE username = ?').get(username.trim());
     if (!row || !this.verifyPassword(password, row.password_hash)) return null;
     return this.publicUser(this.rowToUser(row));
   }
@@ -272,7 +311,7 @@ class AuthStore {
 
   isAdmin(userId) {
     const user = this.getUser(userId);
-    return Boolean(user?.isAdmin || (process.env.ADMIN_USERNAME && user?.username === process.env.ADMIN_USERNAME));
+    return Boolean(user?.isAdmin);
   }
 
   close() {

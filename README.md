@@ -143,15 +143,24 @@ hay lưu lượng gameplay thực tế.
 
 ### Trang quản trị
 
-Mở `http://localhost:3000/admin.html`. API quản trị yêu cầu tài khoản khớp
-với biến môi trường `ADMIN_USERNAME`:
+Tài khoản Admin được tạo riêng từ cấu hình môi trường khi khởi động server.
+Đặt cả tên và mật khẩu (mật khẩu dài 8-128 ký tự):
 
 ```powershell
 $env:ADMIN_USERNAME = "quangphuong"
+$env:ADMIN_PASSWORD = "mat-khau-quan-tri-rieng"
 npm start
 ```
 
-Trang quản trị hiện hiển thị danh sách tài khoản, ELO, hạng và số trận.
+Sau đó mở `http://localhost:3000/admin-login.html`. Admin dùng cookie phiên
+riêng, tách khỏi phiên người chơi; tài khoản người chơi không thể đăng nhập vào
+trang hoặc API quản trị. Đổi `ADMIN_PASSWORD` rồi khởi động lại để thay mật khẩu.
+Hãy dùng tên tài khoản Admin chưa được tài khoản người chơi đăng ký; server sẽ
+từ chối tự nâng quyền một tài khoản thường. Không đưa mật khẩu thật vào Git.
+Đăng nhập Admin ngay trong hộp thoại đăng nhập ở trang chơi cũng được; sau khi
+đăng nhập, nút **Quản trị** xuất hiện trên thanh đầu trang và mở dashboard ngay
+trong giao diện game. Dashboard hiển thị metrics, danh sách tài khoản và cho
+phép tạo/bắt đầu giải cộng đồng.
 
 Bot chỉ gửi một hành động đã thử. Server vẫn giữ trạng thái thật, kiểm tra luật,
 áp dụng nước đi và xác định người thắng.
@@ -367,11 +376,11 @@ Giải đang chạy sẽ tiếp tục từ trận chưa hoàn tất sau khi kh�
 ### Giải cộng đồng do admin tổ chức
 
 Admin mở `/admin.html`, tạo một giải đăng ký với tối đa 12 suất. Người chơi
-đăng nhập rồi mở `/tournaments.html`, chọn một file Python và bấm **Đăng ký
-bot** trong giải cộng đồng. Mỗi tài khoản chỉ được đăng ký một bot trong mỗi
-giải; một submission cũng không thể được dùng bởi hai tài khoản. Admin có thể
-bắt đầu khi có từ 2 đến 12 người, hệ thống tự tạo bracket loại trực tiếp và
-hiển thị tiến độ, danh sách người chơi và nhà vô địch công khai.
+đăng nhập rồi mở `/tournaments.html`, bấm **Tham gia giải** để giữ suất trước;
+sau đó tải bot lên cho suất của mình. Admin chỉ bắt đầu được khi có từ 2 đến
+12 người và tất cả đã tải bot. Mỗi tài khoản chỉ được tham gia một lần trong
+mỗi giải; một bot cũng không thể được đăng ký bởi hai người. Hệ thống tự tạo
+bracket loại trực tiếp và hiển thị tiến độ, danh sách người chơi và nhà vô địch.
 
 Thông tin giải cộng đồng được lưu tại `matches/tournaments/community-events.json`;
 file bot bất biến và metadata chủ sở hữu nằm trong `bots/submissions/`.

@@ -18,9 +18,16 @@ const matchResultSheets = require('./matchResultSheets');
 const RoomStateStore = require('./roomStateStore');
 const BotUploadRateLimiter = require('./botUploadRateLimiter');
 const { createSubmission } = require('./botSubmissions');
+const AdminLoginRateLimiter = require('./adminLoginRateLimiter');
 
 const app = express();
-app.use(express.json({ limit: '300kb' }));
+const defaultJsonParser = express.json({ limit: '256kb' });
+const botUploadJsonParser = express.json({ limit: '2mb' });
+app.use((req, res, next) => {
+  const isBotUpload = req.method === 'POST' &&
+    (/^\/api\/bots$/.test(req.path) || /^\/api\/community-tournaments\/[^/]+\/bot$/.test(req.path));
+  (isBotUpload ? botUploadJsonParser : defaultJsonParser)(req, res, next);
+});
 app.use('/api/match-results', matchResultSheets.router);
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
@@ -34,6 +41,7 @@ const auth = new AuthStore(
 );
 const requestWindows = new Map();
 const botUploadRateLimiter = new BotUploadRateLimiter();
+const adminLoginRateLimiter = new AdminLoginRateLimiter();
 let lastCpuSample = { usage: process.cpuUsage(), sampledAt: Date.now() };
 const matchmakingQueue = [];
 const TURN_LIMIT_MS = 30 * 1000;
@@ -69,17 +77,41 @@ function parseCookies(header = '') {
 }
 
 function getRequestUser(req) {
-  return auth.getSession(parseCookies(req.headers.cookie).ott_session);
+  const cookies = parseCookies(req.headers.cookie);
+  const playerUser = auth.getSession(cookies.ott_session);
+  if (playerUser) return playerUser;
+  const adminUser = auth.getSession(cookies.ott_admin_session);
+  return adminUser && auth.isAdmin(adminUser.id) ? adminUser : null;
+}
+
+function getAdminRequestUser(req) {
+  return auth.getSession(parseCookies(req.headers.cookie).ott_admin_session);
+}
+
+function appendCookie(res, cookie) {
+  const current = res.getHeader('Set-Cookie');
+  const cookies = current ? (Array.isArray(current) ? current : [current]) : [];
+  res.setHeader('Set-Cookie', [...cookies, cookie]);
 }
 
 function setSessionCookie(res, token) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `ott_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800${secure}`);
+  appendCookie(res, `ott_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800${secure}`);
+}
+
+function setAdminSessionCookie(res, token) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  appendCookie(res, `ott_admin_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800${secure}`);
 }
 
 function clearSessionCookie(res) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `ott_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
+  appendCookie(res, `ott_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
+}
+
+function clearAdminSessionCookie(res) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  appendCookie(res, `ott_admin_session=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
 }
 
 function getUploadedBot(botId) {
@@ -199,6 +231,13 @@ function saveBotMatchReplay(room) {
   console.log(`Saved bot match replay: ${room.botMatch.replayFile}`);
 }
 
+app.get('/admin.html', (req, res) => {
+  const user = getAdminRequestUser(req);
+  if (!user || !auth.isAdmin(user.id)) return res.redirect('/admin-login.html');
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
+});
+
 // Serve static frontend assets
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -217,7 +256,7 @@ app.get('/api/profile/:id', (req, res) => {
 });
 
 function requireAdmin(req, res, next) {
-  const user = getRequestUser(req);
+  const user = getAdminRequestUser(req);
   if (!user || !auth.isAdmin(user.id)) return res.status(403).json({ error: 'Bạn không có quyền quản trị.' });
   req.user = user;
   next();
@@ -286,7 +325,21 @@ app.post('/api/community-tournaments', requireAdmin, (req, res) => {
 app.post('/api/community-tournaments/:id/register', (req, res) => {
   const user = getRequestUser(req);
   if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để đăng ký bot.' });
+  const result = communityTournaments.register(req.params.id, {
+    userId: user.id,
+    username: user.username
+  });
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.status(201).json({ tournament: result.event });
+});
+
+app.post('/api/community-tournaments/:id/bot', (req, res) => {
+  const user = getRequestUser(req);
+  if (!user) return res.status(401).json({ error: 'Bạn cần đăng nhập để tải bot lên.' });
+  const registration = communityTournaments.canSubmitBot(req.params.id, user.id);
+  if (registration.error) return res.status(400).json({ error: registration.error });
   if (!enforceBotUploadLimits(req, res, user)) return;
+
   const submission = createSubmission(SUBMISSION_DIR, {
     filename: String(req.body?.filename || ''),
     source: req.body?.source,
@@ -294,9 +347,7 @@ app.post('/api/community-tournaments/:id/register', (req, res) => {
     user
   });
   if (submission.error) return res.status(submission.status).json({ error: submission.error });
-  const result = communityTournaments.register(req.params.id, {
-    userId: user.id,
-    username: user.username,
+  const result = communityTournaments.submitBot(req.params.id, user.id, {
     botId: `submission:${submission.id}`,
     botName: submission.name
   });
@@ -305,7 +356,7 @@ app.post('/api/community-tournaments/:id/register', (req, res) => {
     fs.rmSync(path.join(SUBMISSION_DIR, `${submission.id}.json`), { force: true });
     return res.status(400).json({ error: result.error });
   }
-  res.status(201).json({ tournament: result.event });
+  res.status(201).json({ tournament: result.event, bot: submission });
 });
 
 app.post('/api/community-tournaments/:id/start', requireAdmin, (req, res) => {
@@ -321,20 +372,74 @@ app.post('/api/community-tournaments/:id/start', requireAdmin, (req, res) => {
 app.post('/api/auth/register', (req, res) => {
   const result = auth.createUser(String(req.body?.username || ''), req.body?.password);
   if (result.error) return res.status(400).json({ error: result.error });
+  const cookies = parseCookies(req.headers.cookie);
+  auth.destroySession(cookies.ott_admin_session);
   setSessionCookie(res, auth.createSession(result.user));
+  clearAdminSessionCookie(res);
   res.status(201).json({ user: result.user });
 });
 
 app.post('/api/auth/login', (req, res) => {
-  const user = auth.authenticate(String(req.body?.username || ''), req.body?.password);
-  if (!user) return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không đúng.' });
+  const username = String(req.body?.username || '').trim();
+  const ip = req.socket.remoteAddress || 'unknown';
+  const retryAfter = adminLoginRateLimiter.retryAfter(ip, username);
+  if (retryAfter) {
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'Đăng nhập thất bại quá nhiều lần. Hãy thử lại sau.', retryAfter });
+  }
+  const user = auth.authenticate(username, req.body?.password);
+  if (!user) {
+    adminLoginRateLimiter.recordFailure(ip, username);
+    return res.status(401).json({ error: 'Tên tài khoản hoặc mật khẩu không đúng.' });
+  }
+  adminLoginRateLimiter.clear(ip, username);
+  if (auth.isAdmin(user.id)) {
+    auth.destroySession(parseCookies(req.headers.cookie).ott_session);
+    setAdminSessionCookie(res, auth.createSession(user));
+    clearSessionCookie(res);
+    return res.json({ user });
+  }
+  auth.destroySession(parseCookies(req.headers.cookie).ott_admin_session);
   setSessionCookie(res, auth.createSession(user));
+  clearAdminSessionCookie(res);
   res.json({ user });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/admin/login', (req, res) => {
+  const username = String(req.body?.username || '').trim();
+  const ip = req.socket.remoteAddress || 'unknown';
+  const retryAfter = adminLoginRateLimiter.retryAfter(ip, username);
+  if (retryAfter) {
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'Đăng nhập Admin thất bại quá nhiều lần. Hãy thử lại sau.', retryAfter });
+  }
+  const password = req.body?.password;
+  const user = username.length <= 24 && typeof password === 'string'
+    ? auth.authenticate(username, password)
+    : null;
+  if (!user || !auth.isAdmin(user.id)) {
+    adminLoginRateLimiter.recordFailure(ip, username);
+    return res.status(401).json({ error: 'Thông tin đăng nhập Admin không đúng.' });
+  }
+  adminLoginRateLimiter.clear(ip, username);
   auth.destroySession(parseCookies(req.headers.cookie).ott_session);
+  setAdminSessionCookie(res, auth.createSession(user));
   clearSessionCookie(res);
+  res.json({ user });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  auth.destroySession(parseCookies(req.headers.cookie).ott_admin_session);
+  clearAdminSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  auth.destroySession(cookies.ott_session);
+  auth.destroySession(cookies.ott_admin_session);
+  clearSessionCookie(res);
+  clearAdminSessionCookie(res);
   res.json({ ok: true });
 });
 
@@ -1266,6 +1371,18 @@ heartbeatTimer.unref();
 
 const port = process.env.PORT || 3000;
 async function startServer() {
+  const adminUsername = process.env.ADMIN_USERNAME;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (Boolean(adminUsername) !== Boolean(adminPassword)) {
+    throw new Error('Phải cấu hình đồng thời ADMIN_USERNAME và ADMIN_PASSWORD để tạo tài khoản Admin.');
+  }
+  if (adminUsername && adminPassword) {
+    const result = auth.provisionAdminAccount(adminUsername, adminPassword);
+    if (result.error) throw new Error(result.error);
+    console.info(`Admin account ready: ${result.user.username}`);
+  } else {
+    console.warn('Admin account is not configured; set ADMIN_USERNAME and ADMIN_PASSWORD.');
+  }
   if (roomStateStore) {
     await roomStateStore.connect();
     const snapshots = await roomStateStore.loadRooms();

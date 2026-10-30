@@ -8,7 +8,10 @@
 </head>
 <body>
   <main class="app-shell">
-    <header class="topbar"><a class="brand" href="/"><span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong></a></header>
+    <header class="topbar">
+      <a class="brand" href="/admin.html"><span class="brand-mark">O</span><strong>OTT V2 ADMIN</strong></a>
+      <button id="admin-logout" class="secondary-button" type="button">Đăng xuất Admin</button>
+    </header>
     <section class="lobby-panel" style="margin:40px auto; max-width:900px;">
       <p class="eyebrow">QUẢN TRỊ</p>
       <h1>Giám sát hệ thống</h1>
@@ -31,6 +34,20 @@
     </section>
   </main>
   <script>
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[char]);
+    }
+
+    document.getElementById('admin-logout').onclick = async () => {
+      try {
+        await fetch('/api/admin/logout', { method: 'POST' });
+        location.replace('/admin-login.html');
+      } catch (error) {
+        document.getElementById('admin-message').textContent = error.message;
+      }
+    };
     const metricsPanel = document.getElementById('system-metrics');
     const metricsStatus = document.getElementById('metrics-status');
     async function loadMetrics() {
@@ -65,7 +82,7 @@
       if (!response.ok) throw new Error(data.error || 'Không có quyền.');
       document.getElementById('admin-users').innerHTML = data.users.map(user =>
         `<div style="display:grid;grid-template-columns:1fr repeat(4,auto);gap:18px;padding:12px;border-bottom:1px solid var(--line)">
-          <strong>${user.username}</strong><span>${user.rank}</span><span>${user.elo} ELO</span><span>${user.wins}/${user.games} thắng</span><small>${user.createdAt}</small>
+          <strong>${escapeHtml(user.username)}</strong><span>${escapeHtml(user.rank)}</span><span>${escapeHtml(user.elo)} ELO</span><span>${escapeHtml(user.wins)}/${escapeHtml(user.games)} thắng</span><small>${escapeHtml(user.createdAt)}</small>
         </div>`).join('');
     }).catch(error => document.getElementById('admin-message').textContent = error.message);
     async function loadCommunity() {
@@ -74,10 +91,11 @@
       if (!response.ok) throw new Error(data.error || 'Không thể tải giải cộng đồng.');
       document.getElementById('community-events').innerHTML = data.tournaments.map(event => `
         <div style="border:1px solid var(--line);padding:14px;margin-top:12px;border-radius:8px">
-          <strong>${event.name}</strong> · ${event.status} · ${event.players.length}/12 người
-          ${event.status === 'registration' ? `<button data-start="${event.id}" class="secondary-button" style="float:right">Bắt đầu</button>` : ''}
-          <div>${event.players.map(player => `${player.username} — ${player.botName}`).join('<br>') || 'Chưa có người đăng ký'}</div>
-          ${event.champion ? `<strong>🏆 ${event.champion}</strong>` : ''}
+          <strong>${escapeHtml(event.name)}</strong> · ${escapeHtml(event.status)} · ${event.players.length}/12 người
+          ${event.status === 'registration' ? `<button data-start="${escapeHtml(event.id)}" class="secondary-button" style="float:right" ${event.players.length < 2 || event.players.some(player => !player.botId) ? 'disabled' : ''}>Bắt đầu</button>` : ''}
+          <div>${event.players.map(player => `${escapeHtml(player.username)} — ${escapeHtml(player.botName || 'Đang chờ tải bot')}`).join('<br>') || 'Chưa có người đăng ký'}</div>
+          ${event.status === 'registration' && event.players.some(player => !player.botId) ? '<small class="muted">Chưa thể bắt đầu: cần mọi người tham gia tải bot lên.</small>' : ''}
+          ${event.champion ? `<strong>🏆 ${escapeHtml(event.champion)}</strong>` : ''}
         </div>`).join('');
       document.querySelectorAll('[data-start]').forEach(button => button.onclick = async () => {
         const result = await fetch(`/api/community-tournaments/${button.dataset.start}/start`, { method: 'POST' });

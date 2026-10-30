@@ -12,7 +12,11 @@ window.Auth = (() => {
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Không thể thực hiện yêu cầu.');
+    if (!response.ok) {
+      const error = new Error(data.error || 'Không thể thực hiện yêu cầu.');
+      error.status = response.status;
+      throw error;
+    }
     return data;
   }
 
@@ -42,10 +46,14 @@ window.Auth = (() => {
       return user;
     },
     async login(username, password) {
-      const data = await request('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password })
-      });
+      const options = { method: 'POST', body: JSON.stringify({ username, password }) };
+      let data;
+      try {
+        data = await request('/api/auth/login', options);
+      } catch (error) {
+        if (error.status !== 403) throw error;
+        data = await request('/api/admin/login', options);
+      }
       user = data.user;
       notify();
       return user;
